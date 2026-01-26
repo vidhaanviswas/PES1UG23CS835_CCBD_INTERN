@@ -4,6 +4,8 @@
 
 This research project implements a machine learning pipeline to predict data skew in cloud-based big data jobs **before execution** using lightweight ML models. The project uses the Google Cluster Workload Traces (2019 sample) dataset to train and evaluate models that can identify potentially skewed jobs based on pre-execution features.
 
+> 📐 **Architecture Documentation**: See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed system architecture, component interactions, and design decisions.
+
 ## Dataset Description
 
 The project uses the **Google Cluster Workload Traces (2019 sample)** dataset, specifically the `task_events.csv` file. This dataset contains information about tasks submitted to Google's cluster, including:
