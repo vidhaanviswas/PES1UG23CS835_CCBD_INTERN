@@ -1,0 +1,229 @@
+"""
+Production Prediction Script
+
+This script demonstrates how to use the trained model for real-world predictions.
+It simulates predicting skew for new jobs before they execute.
+"""
+
+import sys
+import pickle
+import pandas as pd
+import numpy as np
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+from train_model import load_models
+from feature_engineering import get_feature_columns
+
+
+def predict_job_skew(job_features: dict, model_name: str = 'logistic_regression'):
+    """
+    Predict if a job will be skewed based on pre-execution features.
+    
+    Parameters:
+    -----------
+    job_features : dict
+        Dictionary with job features:
+        {
+            'num_tasks': int,
+            'avg_task_runtime': float,  # Estimated from history
+            'max_task_runtime': float,  # Estimated from history
+            'std_task_runtime': float,  # Estimated from history
+            'scheduling_class': int,
+            'priority': float
+        }
+    model_name : str
+        Model to use: 'logistic_regression' or 'random_forest'
+        
+    Returns:
+    --------
+    dict
+        Prediction results with probability and label
+    """
+    try:
+        # Load trained models
+        models, scalers = load_models()
+        
+        if model_name not in models:
+            raise ValueError(f"Model '{model_name}' not found. Available: {list(models.keys())}")
+        
+        model = models[model_name]
+        
+        # Get feature columns in correct order
+        feature_cols = get_feature_columns()
+        
+        # Create feature vector
+        X = pd.DataFrame([job_features])[feature_cols]
+        
+        # Handle missing features
+        missing = [col for col in feature_cols if col not in X.columns]
+        if missing:
+            raise ValueError(f"Missing required features: {missing}")
+        
+        # Scale features if using Logistic Regression
+        if model_name == 'logistic_regression':
+            scaler = scalers.get('logistic_regression')
+            X_scaled = scaler.transform(X)
+            # Get probability
+            proba = model.predict_proba(X_scaled)[0]
+        else:
+            proba = model.predict_proba(X)[0]
+        
+        # Get prediction
+        prediction = model.predict(X_scaled if model_name == 'logistic_regression' else X)[0]
+        
+        # Get probability of being skewed
+        skew_probability = proba[1]  # Probability of class 1 (skewed)
+        
+        return {
+            'job_id': job_features.get('job_id', 'unknown'),
+            'prediction': int(prediction),
+            'skew_probability': float(skew_probability),
+            'is_skewed': bool(prediction == 1),
+            'confidence': 'high' if abs(skew_probability - 0.5) > 0.3 else 'medium' if abs(skew_probability - 0.5) > 0.15 else 'low',
+            'recommendation': get_recommendation(prediction, skew_probability)
+        }
+        
+    except Exception as e:
+        return {
+            'error': str(e),
+            'prediction': None
+        }
+
+
+def get_recommendation(prediction: int, probability: float) -> str:
+    """Get actionable recommendation based on prediction."""
+    if prediction == 1:  # Skewed
+        if probability > 0.8:
+            return "HIGH RISK: Job likely to be skewed. Consider increasing parallelism or enabling skew handling."
+        else:
+            return "MODERATE RISK: Job may be skewed. Monitor closely during execution."
+    else:  # Not skewed
+        if probability < 0.2:
+            return "LOW RISK: Job appears balanced. Normal execution expected."
+        else:
+            return "LOW-MODERATE RISK: Job likely balanced but monitor for unexpected skew."
+
+
+def predict_from_dataframe(df: pd.DataFrame, model_name: str = 'logistic_regression'):
+    """
+    Predict skew for multiple jobs from a dataframe.
+    
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        DataFrame with job features
+    model_name : str
+        Model to use
+        
+    Returns:
+    --------
+    pd.DataFrame
+        DataFrame with predictions added
+    """
+    try:
+        models, scalers = load_models()
+        model = models[model_name]
+        feature_cols = get_feature_columns()
+        
+        # Prepare features
+        X = df[feature_cols].copy()
+        
+        # Scale if needed
+        if model_name == 'logistic_regression':
+            scaler = scalers.get('logistic_regression')
+            X_scaled = scaler.transform(X)
+            proba = model.predict_proba(X_scaled)
+            predictions = model.predict(X_scaled)
+        else:
+            proba = model.predict_proba(X)
+            predictions = model.predict(X)
+        
+        # Add predictions to dataframe
+        df_result = df.copy()
+        df_result['predicted_skew'] = predictions
+        df_result['skew_probability'] = proba[:, 1]
+        df_result['prediction_confidence'] = df_result['skew_probability'].apply(
+            lambda p: 'high' if abs(p - 0.5) > 0.3 else 'medium' if abs(p - 0.5) > 0.15 else 'low'
+        )
+        
+        return df_result
+        
+    except Exception as e:
+        print(f"Error in batch prediction: {e}")
+        raise
+
+
+def main():
+    """Demonstrate prediction on sample jobs."""
+    print("="*80)
+    print("JOB SKEW PREDICTION - Production Demo")
+    print("="*80)
+    
+    # Example 1: Predict single job
+    print("\n[Example 1] Predicting skew for a single job...")
+    print("-" * 80)
+    
+    # Simulate a new job with estimated features (from history/metadata)
+    new_job = {
+        'job_id': 'NEW_JOB_001',
+        'num_tasks': 100,
+        'avg_task_runtime': 200000000,  # Estimated from similar jobs
+        'max_task_runtime': 450000000,  # Estimated max
+        'std_task_runtime': 50000000,   # Estimated variability
+        'scheduling_class': 2,
+        'priority': 150
+    }
+    
+    print("Job Features:")
+    for key, value in new_job.items():
+        print(f"  {key}: {value}")
+    
+    result = predict_job_skew(new_job, model_name='logistic_regression')
+    
+    print("\nPrediction Results:")
+    print(f"  Will be skewed: {'YES' if result['is_skewed'] else 'NO'}")
+    print(f"  Skew probability: {result['skew_probability']:.2%}")
+    print(f"  Confidence: {result['confidence']}")
+    print(f"  Recommendation: {result['recommendation']}")
+    
+    # Example 2: Batch prediction
+    print("\n" + "="*80)
+    print("[Example 2] Batch prediction on test data...")
+    print("-" * 80)
+    
+    try:
+        # Load processed data
+        df = pd.read_csv("data/processed/job_level_data.csv")
+        
+        # Use a sample of jobs (simulating new jobs)
+        df_sample = df.sample(n=10, random_state=42)
+        
+        # Predict
+        df_predictions = predict_from_dataframe(df_sample, model_name='logistic_regression')
+        
+        print(f"\nPredictions for {len(df_predictions)} jobs:")
+        print("\nResults:")
+        print(df_predictions[['job_id', 'is_skewed', 'predicted_skew', 
+                              'skew_probability', 'prediction_confidence']].to_string(index=False))
+        
+        # Calculate accuracy
+        accuracy = (df_predictions['is_skewed'] == df_predictions['predicted_skew']).mean()
+        print(f"\nAccuracy on sample: {accuracy:.2%}")
+        
+    except FileNotFoundError:
+        print("Processed data not found. Run main_sample.py first.")
+    
+    print("\n" + "="*80)
+    print("Prediction demo completed!")
+    print("="*80)
+    print("\nTo use in production:")
+    print("  1. Extract features from job metadata/history")
+    print("  2. Call predict_job_skew() with job features")
+    print("  3. Take action based on prediction and recommendation")
+    print("="*80)
+
+
+if __name__ == "__main__":
+    main()
