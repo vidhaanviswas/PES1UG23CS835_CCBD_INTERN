@@ -8,13 +8,13 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    RESEARCH PROJECT ARCHITECTURE                 │
-│         Early Prediction of Data Skew in Big Data Jobs           │
+│                    RESEARCH PROJECT ARCHITECTURE                │
+│         Early Prediction of Data Skew in Big Data Jobs          │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌──────────────┐         ┌──────────────┐         ┌──────────────┐
 │   Raw Data   │────────▶│  Processing  │────────▶│  ML Models  │
-│  (CSV Files) │         │   Pipeline   │         │  (Trained)  │
+│  (CSV Files) │         │   Pipeline   │         │  (Trained)   │
 └──────────────┘         └──────────────┘         └──────────────┘
                                                          │
                                                          ▼
@@ -31,114 +31,114 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          DATA INGESTION LAYER                           │
-│                                                                          │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │  Google Cluster Workload Traces (2019 Sample)                    │  │
-│  │  - task_events.csv (Raw task-level data)                         │  │
-│  │  - Format: Event-based or Direct (auto-detected)                │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│                              │                                           │
-│                              ▼                                           │
-└──────────────────────────────────────────────────────────────────────────┘
+│                                                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  Google Cluster Workload Traces (2019 Sample)                    │   │
+│  │  - task_events.csv (Raw task-level data)                         │   │
+│  │  - Format: Event-based or Direct (auto-detected)                 │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                              │                                          │
+│                              ▼                                          │
+└─────────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                        DATA PROCESSING LAYER                            │
-│                                                                          │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐            │
-│  │   Data       │───▶│ Preprocessing│───▶│   Feature    │            │
-│  │   Loader     │    │   & Cleaning │    │ Engineering  │            │
-│  └──────────────┘    └──────────────┘    └──────────────┘            │
-│       │                     │                     │                    │
-│       │                     │                     │                    │
-│       ▼                     ▼                     ▼                    │
-│  • Load CSV          • Remove invalid    • Aggregate task→job          │
-│  • Auto-detect       • Handle missing    • Compute features:           │
-│    format            • Extract runtime     - num_tasks                │
-│  • Column mapping    • Validate data       - avg_task_runtime         │
-│                       • Type conversion     - max_task_runtime        │
-│                                         - std_task_runtime            │
-│                                         - scheduling_class            │
-│                                         - priority                    │
-└──────────────────────────────────────────────────────────────────────────┘
+│                                                                         │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐               │
+│  │   Data       │───▶│ Preprocessing│───▶│   Feature   │               │
+│  │   Loader     │    │   & Cleaning │    │ Engineering  │               │
+│  └──────────────┘    └──────────────┘    └──────────────┘               │
+│       │                     │                     │                     │
+│       │                     │                     │                     │
+│       ▼                     ▼                     ▼                     │
+│  • Load CSV          • Remove invalid    • Aggregate task→job           │
+│  • Auto-detect       • Handle missing    • Compute features:            │
+│    format            • Extract runtime     - num_tasks                  │
+│  • Column mapping    • Validate data       - avg_task_runtime           │
+│                       • Type conversion     - max_task_runtime          │
+│                                         - std_task_runtime              │
+│                                         - scheduling_class              │
+│                                         - priority                      │
+└─────────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         SKEW LABELING LAYER                             │
-│                                                                          │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │  Label Definition: max_task_runtime >= 2 * avg_task_runtime     │  │
-│  │  • Skewed (1): Jobs with significant runtime imbalance            │  │
-│  │  • Non-skewed (0): All other jobs                                │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│                              │                                           │
-│                              ▼                                           │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │  Processed Job-Level Dataset (job_level_data.csv)                │  │
-│  │  - Features + Labels ready for ML training                        │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────────────┘
+│                                                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  Label Definition: max_task_runtime >= 2 * avg_task_runtime      │   │
+│  │  • Skewed (1): Jobs with significant runtime imbalance           │   │
+│  │  • Non-skewed (0): All other jobs                                │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                              │                                          │
+│                              ▼                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  Processed Job-Level Dataset (job_level_data.csv)                │   │
+│  │  - Features + Labels ready for ML training                       │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        MACHINE LEARNING LAYER                           │
-│                                                                          │
+┌────────────────────────────────────────────────────────────────────────┐
+│                        MACHINE LEARNING LAYER                          │
+│                                                                        │
 │  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                    TRAINING PIPELINE                              │  │
-│  │                                                                   │  │
-│  │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │  │
+│  │                    TRAINING PIPELINE                             │  │
+│  │                                                                  │  │
+│  │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐        │  │
 │  │  │   Train/Test │───▶│   Feature    │───▶│   Model      │       │  │
-│  │  │   Split      │    │   Scaling    │    │   Training   │       │  │
-│  │  │  (80/20)     │    │  (Standard)  │    │              │       │  │
-│  │  └──────────────┘    └──────────────┘    └──────────────┘       │  │
-│  │                                                                    │  │
-│  │  Models Trained:                                                  │  │
+│  │  │   Split      │    │   Scaling    │    │   Training   │        │  │
+│  │  │  (80/20)     │    │  (Standard)  │    │              │        │  │
+│  │  └──────────────┘    └──────────────┘    └──────────────┘        │  │
+│  │                                                                  │  │
+│  │  Models Trained:                                                 │  │
 │  │  • Logistic Regression (with StandardScaler)                     │  │
 │  │  • Random Forest Classifier (100 trees, max_depth=10)            │  │
-│  │                                                                   │  │
+│  │                                                                  │  │
 │  └──────────────────────────────────────────────────────────────────┘  │
-│                              │                                           │
-│                              ▼                                           │
+│                              │                                         │
+│                              ▼                                         │
 │  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                    EVALUATION PIPELINE                            │  │
-│  │                                                                   │  │
-│  │  • Accuracy, Precision, Recall, F1-Score                        │  │
-│  │  • Confusion Matrix                                               │  │
+│  │                    EVALUATION PIPELINE                           │  │
+│  │                                                                  │  │
+│  │  • Accuracy, Precision, Recall, F1-Score                         │  │
+│  │  • Confusion Matrix                                              │  │
 │  │  • Feature Importance (Random Forest)                            │  │
-│  │  • Baseline Comparison (Rule-based)                               │  │
+│  │  • Baseline Comparison (Rule-based)                              │  │
 │  └──────────────────────────────────────────────────────────────────┘  │
-│                              │                                           │
-│                              ▼                                           │
+│                              │                                         │
+│                              ▼                                         │
 │  ┌──────────────────────────────────────────────────────────────────┐  │
 │  │  Trained Models (trained_models.pkl)                             │  │
 │  │  - Logistic Regression model + scaler                            │  │
 │  │  - Random Forest model                                           │  │
 │  └──────────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        PREDICTION & VISUALIZATION LAYER                  │
-│                                                                          │
+┌────────────────────────────────────────────────────────────────────────┐
+│                        PREDICTION & VISUALIZATION LAYER                │
+│                                                                        │
 │  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                    PRODUCTION PREDICTION                          │  │
-│  │                                                                   │  │
+│  │                    PRODUCTION PREDICTION                         │  │
+│  │                                                                  │  │
 │  │  • Single job prediction (predict_job.py)                        │  │
 │  │  • Batch prediction (predict_from_dataframe)                     │  │
 │  │  • Model validation (validate_model.py)                          │  │
 │  └──────────────────────────────────────────────────────────────────┘  │
-│                              │                                           │
-│                              ▼                                           │
+│                              │                                         │
+│                              ▼                                         │
 │  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                    INTERACTIVE DASHBOARD                          │  │
-│  │                    (Streamlit - Optional)                         │  │
-│  │                                                                   │  │
-│  │  • Live job simulation (job_simulator.py)                         │  │
-│  │  • Real-time predictions                                          │  │
-│  │  • Visualizations (charts, tables)                                │  │
-│  │  • Non-technical explanations                                     │  │
+│  │                    INTERACTIVE DASHBOARD                         │  │
+│  │                    (Streamlit - Optional)                        │  │
+│  │                                                                  │  │
+│  │  • Live job simulation (job_simulator.py)                        │  │
+│  │  • Real-time predictions                                         │  │
+│  │  • Visualizations (charts, tables)                               │  │
+│  │  • Non-technical explanations                                    │  │
 │  └──────────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -147,45 +147,45 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         PROJECT COMPONENTS                           │
+│                         PROJECT COMPONENTS                          │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  CORE PIPELINE MODULES (src/)                                        │
+│  CORE PIPELINE MODULES (src/)                                       │
 ├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
-│  │ data_loader │  │preprocessing │  │   feature    │              │
-│  │    .py      │─▶│     .py      │─▶│ engineering  │              │
-│  └──────────────┘  └──────────────┘  │     .py      │              │
-│                                       └──────────────┘              │
-│                                             │                        │
-│                                             ▼                        │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐            │
-│  │   skew       │  │  train_model │  ┌│  evaluate    │            │
-│  │  labeling    │─▶│     .py      │─▶│  _model.py    │            │
-│  │    .py       │  └──────────────┘  └──────────────┘              │
-│  └──────────────┘                          │                        │
-│                                             ▼                        │
+│                                                                     │
+│  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐                │
+│  │ data_loader │  │preprocessing │  │   feature    │                │
+│  │    .py      │─▶│     .py      │─▶│ engineering │                │
+│  └─────────────┘  └──────────────┘  │     .py      │                │
+│                                     └──────────────┘                │
+│                                             │                       │
+│                                             ▼                       │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │
+│  │   skew       │  │  train_model │  │  evaluate    │               │
+│  │  labeling    │─▶│     .py      │─▶│  _model.py  │               │
+│  │    .py       │  └──────────────┘  └──────────────┘               │
+│  └──────────────┘                           │                       │
+│                                             ▼                       │
 │                                    ┌──────────────┐                 │
 │                                    │  baseline.py │                 │
 │                                    └──────────────┘                 │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  EXECUTION SCRIPTS                                                   │
+│  EXECUTION SCRIPTS                                                  │
 ├─────────────────────────────────────────────────────────────────────┤
 │  • main.py          - Full dataset pipeline                         │
-│  • main_sample.py   - Sample data pipeline (faster)                │
+│  • main_sample.py   - Sample data pipeline (faster)                 │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  UTILITY MODULES (Optional)                                          │
+│  UTILITY MODULES (Optional)                                         │
 ├─────────────────────────────────────────────────────────────────────┤
 │  • predict_job.py           - Production prediction interface       │
-│  • validate_model.py        - Model validation & testing           │
+│  • validate_model.py        - Model validation & testing            │
 │  • analyze_results.py       - Results analysis                      │
-│  • create_advanced_plots.py - Advanced visualizations              │
+│  • create_advanced_plots.py - Advanced visualizations               │
 │  • dashboard_app.py         - Streamlit dashboard                   │
 │  • job_simulator.py         - Synthetic job generation              │
 │  • demo_production_use.py   - Production use examples               │
@@ -198,7 +198,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         DATA FLOW PIPELINE                           │
+│                         DATA FLOW PIPELINE                          │
 └─────────────────────────────────────────────────────────────────────┘
 
 INPUT: task_events.csv (Raw Task-Level Data)
@@ -260,7 +260,7 @@ INPUT: task_events.csv (Raw Task-Level Data)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    MACHINE LEARNING PIPELINE                         │
+│                    MACHINE LEARNING PIPELINE                        │
 └─────────────────────────────────────────────────────────────────────┘
 
                     ┌─────────────────────┐
@@ -270,8 +270,8 @@ INPUT: task_events.csv (Raw Task-Level Data)
                                │
                                ▼
                     ┌─────────────────────┐
-                    │   Train/Test Split   │
-                    │   (80/20 stratified) │
+                    │   Train/Test Split  │
+                    │  (80/20 stratified) │
                     └──────────┬──────────┘
                                │
                 ┌──────────────┴──────────────┐
@@ -292,12 +292,12 @@ INPUT: task_events.csv (Raw Task-Level Data)
     ┌───────────┴───────────┐               │
     │                       │               │
     ▼                       ▼               │
-┌──────────┐         ┌──────────┐          │
-│ Logistic │         │  Random  │          │
-│Regression│         │  Forest  │          │
-└────┬─────┘         └─────┬────┘          │
-     │                     │               │
-     └──────────┬──────────┘               │
+┌──────────┐         ┌──────────┐           │
+│ Logistic │         │  Random  │           │
+│Regression│         │  Forest  │           │
+└────┬─────┘         └─────┬────┘           │
+     │                     │                │
+     └──────────┬──────────┘                │
                 │                           │
                 ▼                           │
         ┌───────────────┐                   │
@@ -316,11 +316,11 @@ INPUT: task_events.csv (Raw Task-Level Data)
                 ┌───────────┴───────────┐
                 │                       │
                 ▼                       ▼
-        ┌───────────────┐     ┌───────────────┐
+        ┌───────────────┐     ┌────────────────┐
         │   Metrics     │     │  Visualizations│
         │ (Acc, Prec,   │     │  (Confusion    │
         │  Rec, F1)     │     │   Matrix, etc) │
-        └───────────────┘     └───────────────┘
+        └───────────────┘     └────────────────┘
 ```
 
 ---
@@ -329,42 +329,42 @@ INPUT: task_events.csv (Raw Task-Level Data)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         TECHNOLOGY STACK                             │
+│                         TECHNOLOGY STACK                            │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  PROGRAMMING LANGUAGE                                                │
-│  • Python 3.x                                                        │
+│  PROGRAMMING LANGUAGE                                               │
+│  • Python 3.x                                                       │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  DATA PROCESSING                                                     │
+│  DATA PROCESSING                                                    │
 │  • pandas      - Data manipulation and analysis                     │
 │  • numpy       - Numerical computations                             │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  MACHINE LEARNING                                                    │
+│  MACHINE LEARNING                                                   │
 │  • scikit-learn - ML models (Logistic Regression, Random Forest)    │
-│                 - Model evaluation metrics                           │
+│                 - Model evaluation metrics                          │
 │                 - Data preprocessing (StandardScaler)               │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  VISUALIZATION                                                       │
+│  VISUALIZATION                                                      │
 │  • matplotlib  - Static plots (confusion matrix, feature importance)│
-│  • seaborn     - Statistical visualizations                          │
+│  • seaborn     - Statistical visualizations                         │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  INTERACTIVE DASHBOARD (Optional)                                    │
+│  INTERACTIVE DASHBOARD (Optional)                                   │
 │  • streamlit   - Web-based dashboard for live simulation            │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
 │  DEVELOPMENT TOOLS                                                  │
-│  • Jupyter     - Interactive data exploration                        │
-│  • Git         - Version control                                     │
+│  • Jupyter     - Interactive data exploration                       │
+│  • Git         - Version control                                    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -374,43 +374,43 @@ INPUT: task_events.csv (Raw Task-Level Data)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                      DEPLOYMENT SCENARIOS                            │
+│                      DEPLOYMENT SCENARIOS                           │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
 │  SCENARIO 1: RESEARCH/DEVELOPMENT (Current)                         │
 ├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌──────────────┐                                                  │
-│  │  Local       │                                                  │
-│  │  Machine     │                                                  │
-│  │  (Windows)   │                                                  │
-│  └──────┬───────┘                                                  │
+│                                                                     │
+│  ┌──────────────┐                                                   │
+│  │  Local       │                                                   │
+│  │  Machine     │                                                   │
+│  │  (Windows)   │                                                   │
+│  └──────┬───────┘                                                   │
 │         │                                                           │
-│         ├─▶ Python Environment (.venv)                             │
-│         ├─▶ Data Storage (data/raw/, data/processed/)              │
+│         ├─▶ Python Environment (.venv)                              │
+│         ├─▶ Data Storage (data/raw/, data/processed/)               │
 │         ├─▶ Model Storage (models/)                                 │
 │         └─▶ Execution: python main.py                               │
-│                                                                      │
+│                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
 │  SCENARIO 2: PRODUCTION DEPLOYMENT (Future)                         │
 ├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐         │
-│  │   Job        │───▶│  Prediction  │───▶│  Scheduler   │         │
-│  │  Metadata    │    │    Service   │    │  (YARN/K8s)  │         │
-│  │  (Source)    │    │  (API/Model) │    │              │         │
-│  └──────────────┘    └──────────────┘    └──────────────┘         │
-│         │                   │                                        │
-│         │                   │                                        │
-│         ▼                   ▼                                        │
-│  ┌──────────────┐    ┌──────────────┐                              │
-│  │  Feature     │    │  Monitoring  │                              │
-│  │  Store       │    │  Dashboard   │                              │
-│  └──────────────┘    └──────────────┘                              │
-│                                                                      │
+│                                                                     │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐           │
+│  │   Job        │───▶│  Prediction  │───▶│  Scheduler   │          │
+│  │  Metadata    │    │    Service   │    │  (YARN/K8s)  │           │
+│  │  (Source)    │    │  (API/Model) │    │              │           │
+│  └──────────────┘    └──────────────┘    └──────────────┘           │
+│         │                   │                                       │
+│         │                   │                                       │
+│         ▼                   ▼                                       │
+│  ┌──────────────┐    ┌──────────────┐                               │
+│  │  Feature     │    │  Monitoring  │                               │
+│  │  Store       │    │  Dashboard   │                               │
+│  └──────────────┘    └──────────────┘                               │
+│                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -460,7 +460,7 @@ INPUT: task_events.csv (Raw Task-Level Data)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    SCALABILITY ASPECTS                               │
+│                    SCALABILITY ASPECTS                              │
 └─────────────────────────────────────────────────────────────────────┘
 
 CURRENT LIMITATIONS:
@@ -477,11 +477,11 @@ POTENTIAL IMPROVEMENTS:
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  For Production:                                                     │
+│  For Production:                                                    │
 │  • Deploy as REST API (Flask/FastAPI)                               │
 │  • Use model serving (MLflow, TensorFlow Serving)                   │
 │  • Implement caching for predictions                                │
-│  • Add monitoring and logging                                        │
+│  • Add monitoring and logging                                       │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -498,7 +498,7 @@ POTENTIAL IMPROVEMENTS:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                  SECURITY & BEST PRACTICES                           │
+│                  SECURITY & BEST PRACTICES                          │
 └─────────────────────────────────────────────────────────────────────┘
 
 ✅ IMPLEMENTED:
@@ -522,7 +522,7 @@ POTENTIAL IMPROVEMENTS:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                   COMPONENT INTERACTIONS                             │
+│                   COMPONENT INTERACTIONS                            │
 └─────────────────────────────────────────────────────────────────────┘
 
 main.py (Orchestrator)
@@ -571,7 +571,7 @@ main.py (Orchestrator)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         DATA SCHEMAS                                 │
+│                         DATA SCHEMAS                                │
 └─────────────────────────────────────────────────────────────────────┘
 
 RAW DATA (task_events.csv):
@@ -584,7 +584,7 @@ RAW DATA (task_events.csv):
 │ end_time            │ int          │ End time (microseconds)    │
 │ scheduling_class    │ int          │ Scheduling class (0-3)     │
 │ priority            │ int          │ Priority (0-450)           │
-│ ...                 │ ...         │ Other metadata             │
+│ ...                 │ ...         │ Other metadata              │
 └─────────────────────┴──────────────┴────────────────────────────┘
 
 PROCESSED DATA (job_level_data.csv):
@@ -592,12 +592,12 @@ PROCESSED DATA (job_level_data.csv):
 │ Column              │ Type         │ Description                │
 ├─────────────────────┼──────────────┼────────────────────────────┤
 │ job_id              │ int          │ Job identifier             │
-│ num_tasks           │ int          │ Number of tasks             │
+│ num_tasks           │ int          │ Number of tasks            │
 │ avg_task_runtime    │ float        │ Average runtime            │
 │ max_task_runtime    │ float        │ Maximum runtime            │
 │ std_task_runtime    │ float        │ Standard deviation         │
-│ scheduling_class    │ int          │ Scheduling class            │
-│ priority            │ float        │ Average priority            │
+│ scheduling_class    │ int          │ Scheduling class           │
+│ priority            │ float        │ Average priority           │
 │ is_skewed           │ int (0/1)    │ Skew label                 │
 └─────────────────────┴──────────────┴────────────────────────────┘
 ```
@@ -608,13 +608,13 @@ PROCESSED DATA (job_level_data.csv):
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                      MODEL ARCHITECTURE                              │
+│                      MODEL ARCHITECTURE                             │
 └─────────────────────────────────────────────────────────────────────┘
 
 LOGISTIC REGRESSION:
 ┌─────────────────────────────────────────────────────────────────────┐
 │ Input Features (6) → StandardScaler → Logistic Regression → Output  │
-│                                                                      │
+│                                                                     │
 │ Hyperparameters:                                                    │
 │ • Solver: LBFGS                                                     │
 │ • Max iterations: 1000                                              │
@@ -623,18 +623,18 @@ LOGISTIC REGRESSION:
 
 RANDOM FOREST:
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Input Features (6) → Random Forest Classifier → Output             │
-│                                                                      │
+│ Input Features (6) → Random Forest Classifier → Output              │
+│                                                                     │
 │ Hyperparameters:                                                    │
-│ • N estimators: 100                                                │
+│ • N estimators: 100                                                 │
 │ • Max depth: 10                                                     │
-│ • Random state: 42 (for reproducibility)                           │
+│ • Random state: 42 (for reproducibility)                            │
 └─────────────────────────────────────────────────────────────────────┘
 
 BASELINE (Rule-based):
 ┌─────────────────────────────────────────────────────────────────────┐
 │ max_task_runtime > threshold → skewed (1)                           │
-│                                                                      │
+│                                                                     │
 │ • Threshold optimized on training set                               │
 │ • Maximizes F1-score                                                │
 └─────────────────────────────────────────────────────────────────────┘
@@ -683,7 +683,7 @@ project_root/
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                      EXECUTION FLOW                                  │
+│                      EXECUTION FLOW                                 │
 └─────────────────────────────────────────────────────────────────────┘
 
 User runs: python main.py
