@@ -1,5 +1,7 @@
 # Architecture Summary - Quick Reference
 
+> 📝 **Output Logging**: Use `--save-log` flag with any script to save terminal output to `outputs/` directory. See [LOGGING_GUIDE.md](LOGGING_GUIDE.md) for details.
+
 ## System Overview
 
 ```
@@ -93,8 +95,9 @@ Python 3
 ## Features (Pre-Execution)
 
 1. num_tasks
-2. avg_task_runtime
-3. max_task_runtime
-4. std_task_runtime
-5. scheduling_class
-6. priority
+2. scheduling_class
+3. priority
+4. cpu_request_mean / cpu_request_std
+5. memory_request_mean / memory_request_std
+6. disk_space_request_mean / disk_space_request_std
+7. different_machine_constraint_mean

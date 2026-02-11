@@ -52,14 +52,15 @@
 │       │                     │                     │                    │
 │       │                     │                     │                    │
 │       ▼                     ▼                     ▼                    │
-│  • Load CSV          • Remove invalid    • Aggregate task→job          │
+│  • Load CSV          • Remove invalid    • Aggregate submit→job        │
 │  • Auto-detect       • Handle missing    • Compute features:           │
 │    format            • Extract runtime     - num_tasks                │
-│  • Column mapping    • Validate data       - avg_task_runtime         │
-│                       • Type conversion     - max_task_runtime        │
-│                                         - std_task_runtime            │
-│                                         - scheduling_class            │
-│                                         - priority                    │
+│  • Column mapping    • Validate data       - scheduling_class         │
+│                       • Type conversion     - priority                │
+│                                         - cpu_request_mean/std        │
+│                                         - memory_request_mean/std     │
+│                                         - disk_space_request_mean/std │
+│                                         - different_machine_constraint│
 └──────────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -215,14 +216,15 @@ INPUT: task_events.csv (Raw Task-Level Data)
 │   • Validate data types
 │
 ├─▶ [Step 3] Feature Engineering
-│   • Aggregate task-level → job-level
+│   • Aggregate submit-time metadata → job-level
 │   • Compute features:
 │     - num_tasks (count)
-│     - avg_task_runtime (mean)
-│     - max_task_runtime (max)
-│     - std_task_runtime (std)
-│     - scheduling_class (first/mode)
+│     - scheduling_class (mode)
 │     - priority (mean)
+│     - cpu_request_mean/std
+│     - memory_request_mean/std
+│     - disk_space_request_mean/std
+│     - different_machine_constraint_mean
 │
 ├─▶ [Step 4] Skew Labeling
 │   • Apply rule: max >= 2 * avg → skewed (1)
@@ -230,11 +232,11 @@ INPUT: task_events.csv (Raw Task-Level Data)
 │   • Generate statistics
 │
 ├─▶ [Step 5] Model Training
-│   • Split data (80% train, 20% test)
-│   • Scale features (StandardScaler for LR)
-│   • Train Logistic Regression
-│   • Train Random Forest
-│   • Save models + scalers
+│   • Time-based + template-based splits
+│   • Calibrate probabilities (isotonic)
+│   • Train Logistic Regression, Random Forest
+│   • Optional: XGBoost, LightGBM
+│   • Save models
 │
 ├─▶ [Step 6] Model Evaluation
 │   • Predict on test set
@@ -633,7 +635,7 @@ RANDOM FOREST:
 
 BASELINE (Rule-based):
 ┌─────────────────────────────────────────────────────────────────────┐
-│ max_task_runtime > threshold → skewed (1)                           │
+│ num_tasks > threshold → skewed (1)                                  │
 │                                                                      │
 │ • Threshold optimized on training set                               │
 │ • Maximizes F1-score                                                │

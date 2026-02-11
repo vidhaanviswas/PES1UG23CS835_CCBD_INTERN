@@ -25,12 +25,7 @@ def create_roc_curves(models, scalers, X_test, y_test):
     plt.figure(figsize=(10, 8))
     
     for model_name, model in models.items():
-        if model_name == 'logistic_regression':
-            scaler = scalers.get('logistic_regression')
-            X_test_scaled = scaler.transform(X_test)
-            y_proba = model.predict_proba(X_test_scaled)[:, 1]
-        else:
-            y_proba = model.predict_proba(X_test)[:, 1]
+        y_proba = model.predict_proba(X_test)[:, 1]
         
         fpr, tpr, _ = roc_curve(y_test, y_proba)
         roc_auc = auc(fpr, tpr)
@@ -59,12 +54,7 @@ def create_pr_curves(models, scalers, X_test, y_test):
     plt.figure(figsize=(10, 8))
     
     for model_name, model in models.items():
-        if model_name == 'logistic_regression':
-            scaler = scalers.get('logistic_regression')
-            X_test_scaled = scaler.transform(X_test)
-            y_proba = model.predict_proba(X_test_scaled)[:, 1]
-        else:
-            y_proba = model.predict_proba(X_test)[:, 1]
+        y_proba = model.predict_proba(X_test)[:, 1]
         
         precision, recall, _ = precision_recall_curve(y_test, y_proba)
         avg_precision = average_precision_score(y_test, y_proba)
@@ -98,8 +88,18 @@ def create_feature_comparison_plot():
         print("ERROR: job_level_data.csv not found. Run main_sample.py first.")
         return
     
-    feature_cols = ['num_tasks', 'avg_task_runtime', 'max_task_runtime', 
-                    'std_task_runtime', 'scheduling_class', 'priority']
+    feature_cols = [
+        'num_tasks',
+        'scheduling_class',
+        'priority',
+        'cpu_request_mean',
+        'cpu_request_std',
+        'memory_request_mean',
+        'memory_request_std',
+        'disk_space_request_mean',
+        'disk_space_request_std',
+        'different_machine_constraint_mean',
+    ]
     
     skewed = df[df['is_skewed'] == 1]
     non_skewed = df[df['is_skewed'] == 0]
@@ -133,18 +133,9 @@ def create_feature_comparison_plot():
     print(f"Feature comparison plot saved to {save_path}")
     plt.close()
 
-def create_metrics_comparison_bar():
-    """Create bar chart comparing all models."""
-    # These are your results - update if you re-run
-    results = {
-        'Model': ['Baseline', 'Logistic Regression', 'Random Forest'],
-        'Accuracy': [0.2562, 0.9963, 0.9926],
-        'Precision': [0.0195, 0.9231, 0.8333],
-        'Recall': [0.8571, 0.8571, 0.7143],
-        'F1-Score': [0.0382, 0.8889, 0.7692]
-    }
-    
-    df_results = pd.DataFrame(results)
+def create_metrics_comparison_bar(metrics_df: pd.DataFrame):
+    """Create bar chart comparing all models from a metrics dataframe."""
+    df_results = metrics_df.copy()
     
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     axes = axes.flatten()
@@ -187,7 +178,7 @@ def main():
     print("\n[1] Loading data and models...")
     try:
         df = pd.read_csv("data/processed/job_level_data.csv")
-        X, y = prepare_features_for_training(df)
+        X, y = prepare_features_for_training(df, mode="pre_exec")
         X_train, X_test, y_train, y_test = split_data(X, y)
         
         models, scalers = load_models()
@@ -208,7 +199,21 @@ def main():
     create_feature_comparison_plot()
     
     print("\n[5] Creating metrics comparison chart...")
-    create_metrics_comparison_bar()
+    results = evaluate_all_models(models, scalers, X_test, y_test, get_feature_columns(mode="pre_exec"))
+    metrics_df = pd.DataFrame(
+        [
+            {
+                "Model": name,
+                "Accuracy": m.get("accuracy", 0.0),
+                "Precision": m.get("precision", 0.0),
+                "Recall": m.get("recall", 0.0),
+                "F1-Score": m.get("f1_score", 0.0),
+            }
+            for name, m in results.items()
+        ]
+    )
+    if not metrics_df.empty:
+        create_metrics_comparison_bar(metrics_df)
     
     print("\n" + "="*80)
     print("All visualizations created successfully!")

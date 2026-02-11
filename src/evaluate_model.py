@@ -8,8 +8,10 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
-    confusion_matrix, classification_report
+    confusion_matrix, classification_report, roc_auc_score,
+    average_precision_score, brier_score_loss
 )
+from sklearn.calibration import calibration_curve
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
@@ -51,6 +53,40 @@ def evaluate_model(y_true: pd.Series, y_pred: pd.Series, model_name: str = "Mode
     print(f"{'='*60}\n")
     
     return metrics
+
+
+def evaluate_model_proba(y_true: pd.Series, y_proba: np.ndarray,
+                         model_name: str = "Model") -> dict:
+    """
+    Evaluate probability quality metrics.
+    """
+    pr_auc = average_precision_score(y_true, y_proba)
+    roc_auc = roc_auc_score(y_true, y_proba)
+    brier = brier_score_loss(y_true, y_proba)
+
+    print(f"PR-AUC:   {pr_auc:.4f}")
+    print(f"ROC-AUC:  {roc_auc:.4f}")
+    print(f"Brier:    {brier:.4f}")
+
+    return {
+        "pr_auc": pr_auc,
+        "roc_auc": roc_auc,
+        "brier": brier,
+    }
+
+
+def expected_calibration_error(y_true: pd.Series, y_proba: np.ndarray, n_bins: int = 10) -> float:
+    bins = np.linspace(0.0, 1.0, n_bins + 1)
+    bin_ids = np.digitize(y_proba, bins) - 1
+    ece = 0.0
+    for b in range(n_bins):
+        mask = bin_ids == b
+        if not mask.any():
+            continue
+        acc = y_true[mask].mean()
+        conf = y_proba[mask].mean()
+        ece += (mask.mean()) * abs(acc - conf)
+    return float(ece)
 
 
 def plot_confusion_matrix(y_true: pd.Series, y_pred: pd.Series, 
@@ -110,11 +146,17 @@ def plot_feature_importance(model, feature_names: list, model_name: str = "Model
     save_path : str, optional
         Path to save the plot
     """
-    if not hasattr(model, 'feature_importances_'):
+    base = model
+    if hasattr(model, "base_estimator"):
+        base = model.base_estimator
+    elif hasattr(model, "estimators_") and model.estimators_:
+        base = model.estimators_[0]
+
+    if not hasattr(base, 'feature_importances_'):
         print(f"{model_name} does not support feature importance visualization")
         return
-    
-    importances = model.feature_importances_
+
+    importances = base.feature_importances_
     indices = np.argsort(importances)[::-1]
     
     plt.figure(figsize=(10, 6))
@@ -138,7 +180,7 @@ def plot_feature_importance(model, feature_names: list, model_name: str = "Model
     plt.show()
 
 
-def evaluate_all_models(models: dict, scalers: dict, X_test: pd.DataFrame, 
+def evaluate_all_models(models: dict, scalers: dict, X_test: pd.DataFrame,
                        y_test: pd.Series, feature_names: list):
     """
     Evaluate all trained models and generate visualizations.
@@ -159,16 +201,19 @@ def evaluate_all_models(models: dict, scalers: dict, X_test: pd.DataFrame,
     results = {}
     
     for model_name, model in models.items():
-        # Prepare features
-        if model_name == 'logistic_regression':
-            scaler = scalers.get('logistic_regression')
-            X_test_scaled = scaler.transform(X_test)
-            y_pred = model.predict(X_test_scaled)
+        # Predict
+        y_pred = model.predict(X_test)
+        if hasattr(model, "predict_proba"):
+            y_proba = model.predict_proba(X_test)[:, 1]
         else:
-            y_pred = model.predict(X_test)
+            y_proba = y_pred.astype(float)
         
         # Evaluate
         metrics = evaluate_model(y_test, y_pred, model_name)
+        proba_metrics = evaluate_model_proba(y_test, y_proba, model_name)
+        ece = expected_calibration_error(y_test.to_numpy(), y_proba)
+        metrics.update(proba_metrics)
+        metrics["ece"] = ece
         results[model_name] = metrics
         
         # Plot confusion matrix
@@ -195,22 +240,23 @@ def print_comparison_table(results: dict):
     print("\n" + "="*80)
     print("MODEL COMPARISON")
     print("="*80)
-    print(f"{'Model':<25} {'Accuracy':<12} {'Precision':<12} {'Recall':<12} {'F1-Score':<12}")
+    print(f"{'Model':<25} {'Accuracy':<12} {'Precision':<12} {'Recall':<12} {'F1-Score':<12} {'PR-AUC':<10} {'ECE':<10}")
     print("-"*80)
     
     for model_name, metrics in results.items():
-        print(f"{model_name:<25} {metrics['accuracy']:<12.4f} "
+          print(f"{model_name:<25} {metrics['accuracy']:<12.4f} "
               f"{metrics['precision']:<12.4f} {metrics['recall']:<12.4f} "
-              f"{metrics['f1_score']:<12.4f}")
+              f"{metrics['f1_score']:<12.4f} {metrics.get('pr_auc', 0.0):<10.4f} "
+              f"{metrics.get('ece', 0.0):<10.4f}")
     
     print("="*80 + "\n")
 
 
 if __name__ == "__main__":
     from data_loader import load_task_events
-    from preprocessing import clean_task_events, extract_task_runtimes, prepare_for_aggregation
-    from feature_engineering import aggregate_to_job_level, encode_categorical_features, prepare_features_for_training, get_feature_columns
-    from skew_labeling import label_skewed_jobs
+    from preprocessing import clean_task_events, extract_task_runtimes
+    from feature_engineering import extract_pre_execution_features, encode_categorical_features, prepare_features_for_training, get_feature_columns
+    from skew_labeling import label_jobs_from_task_runtimes
     from train_model import split_data, load_models
     
     # Test model evaluation
@@ -219,19 +265,19 @@ if __name__ == "__main__":
         df = load_task_events()
         df_clean = clean_task_events(df)
         df_runtimes = extract_task_runtimes(df_clean)
-        df_prep = prepare_for_aggregation(df_runtimes)
-        job_features = aggregate_to_job_level(df_prep)
-        job_features = encode_categorical_features(job_features)
-        job_labeled = label_skewed_jobs(job_features)
+        pre_exec = extract_pre_execution_features(df_clean)
+        pre_exec = encode_categorical_features(pre_exec)
+        labels = label_jobs_from_task_runtimes(df_runtimes)
+        job_labeled = pre_exec.merge(labels, on="job_id", how="inner")
         
-        X, y = prepare_features_for_training(job_labeled)
+        X, y = prepare_features_for_training(job_labeled, mode="pre_exec")
         X_train, X_test, y_train, y_test = split_data(X, y)
         
         # Load models
         models, scalers = load_models()
         
         # Evaluate
-        feature_names = get_feature_columns()
+        feature_names = get_feature_columns(mode="pre_exec")
         results = evaluate_all_models(models, scalers, X_test, y_test, feature_names)
         print_comparison_table(results)
         

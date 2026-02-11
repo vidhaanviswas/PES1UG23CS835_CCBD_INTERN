@@ -1,0 +1,2 @@
+# This directory stores log files from pipeline runs
+# Log files are generated when scripts are run with --save-log flag

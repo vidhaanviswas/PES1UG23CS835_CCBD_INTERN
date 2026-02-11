@@ -51,13 +51,7 @@ def validate_cross_validation(models, scalers, X, y):
     for model_name, model in models.items():
         print(f"\nTesting {model_name}...")
         
-        # Prepare features
-        if model_name == 'logistic_regression':
-            scaler = scalers.get('logistic_regression')
-            X_scaled = scaler.fit_transform(X)
-            X_processed = X_scaled
-        else:
-            X_processed = X
+        X_processed = X
         
         # 5-fold cross-validation
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
@@ -96,20 +90,28 @@ def validate_prediction_interface():
         {
             'job_id': 'TEST_001',
             'num_tasks': 50,
-            'avg_task_runtime': 200000000,
-            'max_task_runtime': 400000000,  # 2x avg - should be skewed
-            'std_task_runtime': 50000000,
             'scheduling_class': 1,
-            'priority': 100
+            'priority': 100,
+            'cpu_request_mean': 1.1,
+            'cpu_request_std': 0.4,
+            'memory_request_mean': 0.9,
+            'memory_request_std': 0.3,
+            'disk_space_request_mean': 0.5,
+            'disk_space_request_std': 0.2,
+            'different_machine_constraint_mean': 0.0,
         },
         {
             'job_id': 'TEST_002',
             'num_tasks': 20,
-            'avg_task_runtime': 250000000,
-            'max_task_runtime': 300000000,  # < 2x avg - should not be skewed
-            'std_task_runtime': 10000000,
             'scheduling_class': 2,
-            'priority': 150
+            'priority': 150,
+            'cpu_request_mean': 0.4,
+            'cpu_request_std': 0.05,
+            'memory_request_mean': 0.3,
+            'memory_request_std': 0.04,
+            'disk_space_request_mean': 0.2,
+            'disk_space_request_std': 0.03,
+            'different_machine_constraint_mean': 0.0,
         }
     ]
     
@@ -147,15 +149,8 @@ def validate_on_unseen_data(models, scalers, X_train, X_test, y_train, y_test):
     for model_name, model in models.items():
         print(f"\nTesting {model_name} on test set...")
         
-        # Prepare features
-        if model_name == 'logistic_regression':
-            scaler = scalers.get('logistic_regression')
-            X_test_scaled = scaler.transform(X_test)
-            y_pred = model.predict(X_test_scaled)
-            y_proba = model.predict_proba(X_test_scaled)[:, 1]
-        else:
-            y_pred = model.predict(X_test)
-            y_proba = model.predict_proba(X_test)[:, 1]
+        y_pred = model.predict(X_test)
+        y_proba = model.predict_proba(X_test)[:, 1]
         
         # Calculate metrics
         from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
@@ -197,7 +192,7 @@ def validate_batch_prediction():
     try:
         # Load data
         df = pd.read_csv("data/processed/job_level_data.csv")
-        X, y = prepare_features_for_training(df)
+        X, y = prepare_features_for_training(df, mode="pre_exec")
         _, X_test, _, y_test = split_data(X, y)
         
         # Get test jobs
@@ -231,7 +226,7 @@ def generate_validation_report():
     # Load data
     try:
         df = pd.read_csv("data/processed/job_level_data.csv")
-        X, y = prepare_features_for_training(df)
+        X, y = prepare_features_for_training(df, mode="pre_exec")
         X_train, X_test, y_train, y_test = split_data(X, y)
     except FileNotFoundError:
         print("❌ Processed data not found. Run main_sample.py first.")

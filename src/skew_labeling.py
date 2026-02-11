@@ -1,12 +1,56 @@
 """
 Skew Labeling Module
 
-This module labels jobs as skewed or non-skewed based on the definition:
-A job is skewed if max_task_runtime >= 2 * average_task_runtime
+Labels jobs as skewed or non-skewed based on:
+max_task_runtime >= 2 * average_task_runtime.
 """
 
 import pandas as pd
 import numpy as np
+
+
+def compute_job_runtime_stats(task_runtimes: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute job-level runtime statistics from task runtimes.
+
+    Parameters:
+    -----------
+    task_runtimes : pd.DataFrame
+        Dataframe containing job_id and runtime
+
+    Returns:
+    --------
+    pd.DataFrame
+        Job-level runtime stats (avg, max, std)
+    """
+    required = {"job_id", "runtime"}
+    missing = required - set(task_runtimes.columns)
+    if missing:
+        raise ValueError(f"Missing required columns for runtimes: {sorted(missing)}")
+
+    df = task_runtimes.copy()
+    df["runtime"] = pd.to_numeric(df["runtime"], errors="coerce")
+    df = df[df["runtime"].notna()]
+    df = df[df["runtime"] > 0]
+
+    stats = df.groupby("job_id")["runtime"].agg(["mean", "max", "std"]).reset_index()
+    stats = stats.rename(
+        columns={
+            "mean": "avg_task_runtime",
+            "max": "max_task_runtime",
+            "std": "std_task_runtime",
+        }
+    )
+    stats["std_task_runtime"] = stats["std_task_runtime"].fillna(0)
+    return stats
+
+
+def label_jobs_from_task_runtimes(task_runtimes: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute runtime stats and apply skew labels.
+    """
+    stats = compute_job_runtime_stats(task_runtimes)
+    return label_skewed_jobs(stats)
 
 
 def label_skewed_jobs(df: pd.DataFrame) -> pd.DataFrame:
@@ -85,18 +129,14 @@ def get_skew_statistics(df: pd.DataFrame) -> dict:
 
 if __name__ == "__main__":
     from data_loader import load_task_events
-    from preprocessing import clean_task_events, extract_task_runtimes, prepare_for_aggregation
-    from feature_engineering import aggregate_to_job_level, encode_categorical_features
+    from preprocessing import clean_task_events, extract_task_runtimes
     
     # Test skew labeling
     try:
         df = load_task_events()
         df_clean = clean_task_events(df)
         df_runtimes = extract_task_runtimes(df_clean)
-        df_prep = prepare_for_aggregation(df_runtimes)
-        job_features = aggregate_to_job_level(df_prep)
-        job_features = encode_categorical_features(job_features)
-        job_labeled = label_skewed_jobs(job_features)
+        job_labeled = label_jobs_from_task_runtimes(df_runtimes)
         
         stats = get_skew_statistics(job_labeled)
         print("\nSkew statistics:")

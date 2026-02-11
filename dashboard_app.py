@@ -63,40 +63,11 @@ def _risk_band(prob: float, threshold: float) -> RiskBand:
     )
 
 
-def _fmt_duration(x: object) -> str:
-    """
-    Human-friendly duration string.
-
-    Note: in your processed dataset, task runtimes may be in microseconds (as seen in sample traces).
-    We show both raw and a scaled view to avoid confusion.
-    """
+def _fmt_value(x: object) -> str:
     try:
-        v = float(x)
+        return f"{float(x):,.2f}"
     except Exception:
         return "-"
-    if v < 0:
-        return "-"
-
-    # Heuristic: if very large, treat as microseconds and convert to seconds.
-    # (In the user's sample run we saw values around 1e8..3e8 which align with microseconds.)
-    if v >= 1e6:
-        secs = v / 1e6
-        if secs < 60:
-            return f"{secs:,.2f} s"
-        mins = secs / 60.0
-        if mins < 60:
-            return f"{mins:,.2f} min"
-        hrs = mins / 60.0
-        return f"{hrs:,.2f} hr"
-
-    # Otherwise treat as seconds.
-    if v < 60:
-        return f"{v:,.2f} s"
-    mins = v / 60.0
-    if mins < 60:
-        return f"{mins:,.2f} min"
-    hrs = mins / 60.0
-    return f"{hrs:,.2f} hr"
 
 
 def _init_state() -> None:
@@ -280,40 +251,20 @@ and highlights jobs that might need attention.
             "flagged",
             "prediction_confidence",
             "num_tasks",
-            "avg_task_runtime",
-            "max_task_runtime",
-            "std_task_runtime",
             "scheduling_class",
             "priority",
+            "cpu_request_mean",
+            "cpu_request_std",
+            "memory_request_mean",
+            "memory_request_std",
+            "disk_space_request_mean",
+            "disk_space_request_std",
         ]
 
         if total:
             df_view = df_all.sort_values("ingest_time", ascending=False).copy()
-            # Add human-friendly runtime columns (keeps the raw values too for research).
-            df_view["avg_task_runtime_readable"] = df_view["avg_task_runtime"].map(_fmt_duration)
-            df_view["max_task_runtime_readable"] = df_view["max_task_runtime"].map(_fmt_duration)
-            df_view["std_task_runtime_readable"] = df_view["std_task_runtime"].map(_fmt_duration)
-
-            # Put readable versions next to raw columns for clarity.
             df_display = df_view.copy()
-            df_display.insert(df_display.columns.get_loc("avg_task_runtime") + 1, "avg_rt", df_view["avg_task_runtime_readable"])
-            df_display.insert(df_display.columns.get_loc("max_task_runtime") + 1, "max_rt", df_view["max_task_runtime_readable"])
-            df_display.insert(df_display.columns.get_loc("std_task_runtime") + 1, "std_rt", df_view["std_task_runtime_readable"])
-
-            show_cols_pretty = [
-                "job_id",
-                "risk_band",
-                "skew_probability",
-                "flagged",
-                "prediction_confidence",
-                "num_tasks",
-                "avg_rt",
-                "max_rt",
-                "std_rt",
-                "scheduling_class",
-                "priority",
-            ]
-            st.dataframe(df_display[show_cols_pretty], use_container_width=True, height=460)
+            st.dataframe(df_display[show_cols], use_container_width=True, height=460)
 
             st.divider()
             st.subheader("Explain one job (pick from the latest jobs)")
@@ -332,16 +283,16 @@ and highlights jobs that might need attention.
             with st.expander("Why did the model say this? (plain English)", expanded=True):
                 st.markdown(
                     f"""
-The model looks at a job’s **task runtime pattern** and **job metadata**.
-The strongest warning sign in this research is usually a **high variation** in task runtimes (**std_task_runtime**).
+The model uses **pre-execution metadata** (no runtime leakage).
+It looks for patterns like *very large task counts* or *high resource request variability*.
 
 For this job:
 - **Number of tasks**: {int(row.get("num_tasks", 0))}
-- **Average task runtime**: {_fmt_duration(row.get("avg_task_runtime"))}
-- **Max task runtime**: {_fmt_duration(row.get("max_task_runtime"))}
-- **Runtime variation (std)**: {_fmt_duration(row.get("std_task_runtime"))}
+- **CPU request (mean / std)**: {_fmt_value(row.get("cpu_request_mean"))} / {_fmt_value(row.get("cpu_request_std"))}
+- **Memory request (mean / std)**: {_fmt_value(row.get("memory_request_mean"))} / {_fmt_value(row.get("memory_request_std"))}
+- **Disk request (mean / std)**: {_fmt_value(row.get("disk_space_request_mean"))} / {_fmt_value(row.get("disk_space_request_std"))}
 
-If the max runtime is much larger than the typical runtime (or variation is very high), the job is more likely to be skewed.
+High variability in requested resources can signal uneven task workloads, which increases skew risk.
                     """.strip()
                 )
 

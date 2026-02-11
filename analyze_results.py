@@ -36,8 +36,21 @@ def analyze_results():
     
     # 3. Feature statistics
     print("\n[3] Feature Statistics:")
-    feature_cols = ['num_tasks', 'avg_task_runtime', 'max_task_runtime', 
-                    'std_task_runtime', 'scheduling_class', 'priority']
+    feature_cols = [
+        'num_tasks',
+        'scheduling_class',
+        'priority',
+        'cpu_request_mean',
+        'cpu_request_std',
+        'memory_request_mean',
+        'memory_request_std',
+        'disk_space_request_mean',
+        'disk_space_request_std',
+        'different_machine_constraint_mean',
+        'avg_task_runtime',
+        'max_task_runtime',
+        'std_task_runtime',
+    ]
     
     for col in feature_cols:
         if col in df.columns:
@@ -83,10 +96,16 @@ def analyze_results():
             # Feature importance for Random Forest
             if 'random_forest' in models:
                 rf = models['random_forest']
-                if hasattr(rf, 'feature_importances_'):
+                base = rf
+                if hasattr(rf, 'base_estimator'):
+                    base = rf.base_estimator
+                elif hasattr(rf, 'estimators_') and rf.estimators_:
+                    base = rf.estimators_[0]
+
+                if hasattr(base, 'feature_importances_'):
                     print("\n   Random Forest Feature Importance:")
-                    importances = rf.feature_importances_
-                    feature_names = feature_cols
+                    importances = base.feature_importances_
+                    feature_names = [c for c in feature_cols if c in df.columns]
                     for feat, imp in sorted(zip(feature_names, importances), 
                                           key=lambda x: x[1], reverse=True):
                         print(f"     {feat}: {imp:.4f}")

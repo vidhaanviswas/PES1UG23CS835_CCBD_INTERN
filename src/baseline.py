@@ -1,8 +1,8 @@
 """
 Baseline Comparison Module
 
-This module implements a simple rule-based baseline for comparison with ML models.
-Baseline: If max_task_runtime > threshold → skewed
+Rule-based baseline using pre-execution features only.
+Default: If num_tasks > threshold -> skewed.
 """
 
 import pandas as pd
@@ -17,17 +17,18 @@ import os
 from pathlib import Path
 
 
-def baseline_predict(df: pd.DataFrame, threshold: float = None) -> pd.Series:
+def baseline_predict(df: pd.DataFrame, threshold: float = None,
+                    feature: str = "num_tasks") -> pd.Series:
     """
     Predict skewed jobs using a simple rule-based baseline.
     
-    Baseline rule: If max_task_runtime > threshold → skewed (1), else non-skewed (0)
-    If threshold is None, uses median of max_task_runtime as threshold.
+    Baseline rule: If feature > threshold -> skewed (1), else non-skewed (0).
+    If threshold is None, uses median of the feature.
     
     Parameters:
     -----------
     df : pd.DataFrame
-        Job-level dataframe with max_task_runtime
+        Job-level dataframe with the selected feature
     threshold : float, optional
         Threshold for max_task_runtime. If None, uses median.
         
@@ -36,23 +37,27 @@ def baseline_predict(df: pd.DataFrame, threshold: float = None) -> pd.Series:
     pd.Series
         Predicted labels (0 or 1)
     """
+    if feature not in df.columns:
+        raise ValueError(f"Baseline feature '{feature}' not found in dataframe")
+
     if threshold is None:
-        threshold = df['max_task_runtime'].median()
-        print(f"Using median max_task_runtime as threshold: {threshold:.2f}")
+        threshold = df[feature].median()
+        print(f"Using median {feature} as threshold: {threshold:.2f}")
     
-    predictions = (df['max_task_runtime'] > threshold).astype(int)
+    predictions = (df[feature] > threshold).astype(int)
     
     return predictions
 
 
-def find_optimal_threshold(df: pd.DataFrame, y_true: pd.Series) -> float:
+def find_optimal_threshold(df: pd.DataFrame, y_true: pd.Series,
+                          feature: str = "num_tasks") -> float:
     """
     Find the optimal threshold for the baseline by maximizing F1-score.
     
     Parameters:
     -----------
     df : pd.DataFrame
-        Job-level dataframe with max_task_runtime
+        Job-level dataframe with the selected feature
     y_true : pd.Series
         True labels
         
@@ -61,34 +66,37 @@ def find_optimal_threshold(df: pd.DataFrame, y_true: pd.Series) -> float:
     float
         Optimal threshold value
     """
-    max_runtime = df['max_task_runtime']
-    thresholds = np.linspace(max_runtime.min(), max_runtime.max(), 100)
+    if feature not in df.columns:
+        raise ValueError(f"Baseline feature '{feature}' not found in dataframe")
+
+    values = df[feature]
+    thresholds = np.linspace(values.min(), values.max(), 100)
     
     best_threshold = None
     best_f1 = -1
     
     for threshold in thresholds:
-        y_pred = (max_runtime > threshold).astype(int)
+        y_pred = (values > threshold).astype(int)
         f1 = f1_score(y_true, y_pred, zero_division=0)
         
         if f1 > best_f1:
             best_f1 = f1
             best_threshold = threshold
     
-    print(f"Optimal threshold: {best_threshold:.2f} (F1-score: {best_f1:.4f})")
+    print(f"Optimal threshold for {feature}: {best_threshold:.2f} (F1-score: {best_f1:.4f})")
     
     return best_threshold
 
 
-def evaluate_baseline(df: pd.DataFrame, y_true: pd.Series, 
-                     threshold: float = None) -> dict:
+def evaluate_baseline(df: pd.DataFrame, y_true: pd.Series,
+                     threshold: float = None, feature: str = "num_tasks") -> dict:
     """
     Evaluate the baseline model.
     
     Parameters:
     -----------
     df : pd.DataFrame
-        Job-level dataframe with max_task_runtime
+        Job-level dataframe with the selected feature
     y_true : pd.Series
         True labels
     threshold : float, optional
@@ -100,9 +108,9 @@ def evaluate_baseline(df: pd.DataFrame, y_true: pd.Series,
         Dictionary of evaluation metrics
     """
     if threshold is None:
-        threshold = find_optimal_threshold(df, y_true)
+        threshold = find_optimal_threshold(df, y_true, feature=feature)
     
-    y_pred = baseline_predict(df, threshold)
+    y_pred = baseline_predict(df, threshold, feature=feature)
     
     metrics = {
         'accuracy': accuracy_score(y_true, y_pred),
@@ -196,9 +204,9 @@ def compare_with_ml_models(baseline_metrics: dict, ml_results: dict):
 
 if __name__ == "__main__":
     from data_loader import load_task_events
-    from preprocessing import clean_task_events, extract_task_runtimes, prepare_for_aggregation
-    from feature_engineering import aggregate_to_job_level, encode_categorical_features, prepare_features_for_training
-    from skew_labeling import label_skewed_jobs
+    from preprocessing import clean_task_events, extract_task_runtimes
+    from feature_engineering import extract_pre_execution_features, encode_categorical_features, prepare_features_for_training
+    from skew_labeling import label_jobs_from_task_runtimes
     from train_model import split_data, load_models
     from evaluate_model import evaluate_all_models
     from feature_engineering import get_feature_columns
@@ -209,24 +217,24 @@ if __name__ == "__main__":
         df = load_task_events()
         df_clean = clean_task_events(df)
         df_runtimes = extract_task_runtimes(df_clean)
-        df_prep = prepare_for_aggregation(df_runtimes)
-        job_features = aggregate_to_job_level(df_prep)
-        job_features = encode_categorical_features(job_features)
-        job_labeled = label_skewed_jobs(job_features)
+        pre_exec = extract_pre_execution_features(df_clean)
+        pre_exec = encode_categorical_features(pre_exec)
+        labels = label_jobs_from_task_runtimes(df_runtimes)
+        job_labeled = pre_exec.merge(labels, on="job_id", how="inner")
         
-        X, y = prepare_features_for_training(job_labeled)
+        X, y = prepare_features_for_training(job_labeled, mode="pre_exec")
         X_train, X_test, y_train, y_test = split_data(X, y)
         
         # Evaluate baseline
         baseline_metrics, y_pred_baseline = evaluate_baseline(
-            job_labeled.loc[X_test.index], y_test
+            job_labeled.loc[X_test.index], y_test, feature="num_tasks"
         )
         plot_baseline_confusion_matrix(y_test, y_pred_baseline,
                                      "models/confusion_matrix_baseline.png")
         
         # Load and evaluate ML models
         models, scalers = load_models()
-        feature_names = get_feature_columns()
+        feature_names = get_feature_columns(mode="pre_exec")
         ml_results = evaluate_all_models(models, scalers, X_test, y_test, feature_names)
         
         # Compare

@@ -27,11 +27,15 @@ def predict_job_skew(job_features: dict, model_name: str = 'logistic_regression'
         Dictionary with job features:
         {
             'num_tasks': int,
-            'avg_task_runtime': float,  # Estimated from history
-            'max_task_runtime': float,  # Estimated from history
-            'std_task_runtime': float,  # Estimated from history
             'scheduling_class': int,
-            'priority': float
+            'priority': float,
+            'cpu_request_mean': float,
+            'cpu_request_std': float,
+            'memory_request_mean': float,
+            'memory_request_std': float,
+            'disk_space_request_mean': float,
+            'disk_space_request_std': float,
+            'different_machine_constraint_mean': float
         }
     model_name : str
         Model to use: 'logistic_regression' or 'random_forest'
@@ -51,7 +55,7 @@ def predict_job_skew(job_features: dict, model_name: str = 'logistic_regression'
         model = models[model_name]
         
         # Get feature columns in correct order
-        feature_cols = get_feature_columns()
+        feature_cols = get_feature_columns(mode="pre_exec")
         
         # Create feature vector
         X = pd.DataFrame([job_features])[feature_cols]
@@ -61,17 +65,9 @@ def predict_job_skew(job_features: dict, model_name: str = 'logistic_regression'
         if missing:
             raise ValueError(f"Missing required features: {missing}")
         
-        # Scale features if using Logistic Regression
-        if model_name == 'logistic_regression':
-            scaler = scalers.get('logistic_regression')
-            X_scaled = scaler.transform(X)
-            # Get probability
-            proba = model.predict_proba(X_scaled)[0]
-        else:
-            proba = model.predict_proba(X)[0]
-        
-        # Get prediction
-        prediction = model.predict(X_scaled if model_name == 'logistic_regression' else X)[0]
+        # Get probability and prediction
+        proba = model.predict_proba(X)[0]
+        prediction = model.predict(X)[0]
         
         # Get probability of being skewed
         skew_probability = proba[1]  # Probability of class 1 (skewed)
@@ -125,20 +121,13 @@ def predict_from_dataframe(df: pd.DataFrame, model_name: str = 'logistic_regress
     try:
         models, scalers = load_models()
         model = models[model_name]
-        feature_cols = get_feature_columns()
+        feature_cols = get_feature_columns(mode="pre_exec")
         
         # Prepare features
         X = df[feature_cols].copy()
         
-        # Scale if needed
-        if model_name == 'logistic_regression':
-            scaler = scalers.get('logistic_regression')
-            X_scaled = scaler.transform(X)
-            proba = model.predict_proba(X_scaled)
-            predictions = model.predict(X_scaled)
-        else:
-            proba = model.predict_proba(X)
-            predictions = model.predict(X)
+        proba = model.predict_proba(X)
+        predictions = model.predict(X)
         
         # Add predictions to dataframe
         df_result = df.copy()
@@ -169,11 +158,15 @@ def main():
     new_job = {
         'job_id': 'NEW_JOB_001',
         'num_tasks': 100,
-        'avg_task_runtime': 200000000,  # Estimated from similar jobs
-        'max_task_runtime': 450000000,  # Estimated max
-        'std_task_runtime': 50000000,   # Estimated variability
         'scheduling_class': 2,
-        'priority': 150
+        'priority': 150,
+        'cpu_request_mean': 0.8,
+        'cpu_request_std': 0.1,
+        'memory_request_mean': 0.6,
+        'memory_request_std': 0.2,
+        'disk_space_request_mean': 0.4,
+        'disk_space_request_std': 0.1,
+        'different_machine_constraint_mean': 0.0,
     }
     
     print("Job Features:")

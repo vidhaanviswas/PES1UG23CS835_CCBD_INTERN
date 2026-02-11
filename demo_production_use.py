@@ -34,11 +34,15 @@ def demo_single_prediction():
     new_job = {
         'job_id': 'PROD_JOB_2024_001',
         'num_tasks': 150,
-        'avg_task_runtime': 180000000,  # Estimated from similar jobs
-        'max_task_runtime': 420000000,   # Estimated max (2.33x avg - likely skewed!)
-        'std_task_runtime': 75000000,    # High variability
         'scheduling_class': 2,
-        'priority': 175
+        'priority': 175,
+        'cpu_request_mean': 1.2,
+        'cpu_request_std': 0.4,
+        'memory_request_mean': 0.9,
+        'memory_request_std': 0.35,
+        'disk_space_request_mean': 0.6,
+        'disk_space_request_std': 0.25,
+        'different_machine_constraint_mean': 0.0,
     }
     
     for key, value in new_job.items():
@@ -69,7 +73,7 @@ def demo_batch_prediction():
     try:
         # Load test data (simulating a queue of jobs)
         df = pd.read_csv("data/processed/job_level_data.csv")
-        X, y = prepare_features_for_training(df)
+        X, y = prepare_features_for_training(df, mode="pre_exec")
         _, X_test, _, y_test = split_data(X, y)
         
         # Get test jobs
@@ -119,7 +123,7 @@ def demo_model_performance():
     try:
         # Load data
         df = pd.read_csv("data/processed/job_level_data.csv")
-        X, y = prepare_features_for_training(df)
+        X, y = prepare_features_for_training(df, mode="pre_exec")
         X_train, X_test, y_train, y_test = split_data(X, y)
         
         # Load models
@@ -188,54 +192,74 @@ def demo_production_scenario():
         {
             'job_id': 'JOB_001',
             'num_tasks': 50,
-            'avg_task_runtime': 200000000,
-            'max_task_runtime': 500000000,  # 2.5x - skewed!
-            'std_task_runtime': 80000000,
             'scheduling_class': 1,
-            'priority': 100
+            'priority': 100,
+            'cpu_request_mean': 1.1,
+            'cpu_request_std': 0.4,
+            'memory_request_mean': 0.9,
+            'memory_request_std': 0.35,
+            'disk_space_request_mean': 0.6,
+            'disk_space_request_std': 0.25,
+            'different_machine_constraint_mean': 0.0,
         },
         {
             'job_id': 'JOB_002',
             'num_tasks': 30,
-            'avg_task_runtime': 250000000,
-            'max_task_runtime': 300000000,  # 1.2x - not skewed
-            'std_task_runtime': 15000000,
             'scheduling_class': 2,
-            'priority': 150
+            'priority': 150,
+            'cpu_request_mean': 0.4,
+            'cpu_request_std': 0.05,
+            'memory_request_mean': 0.3,
+            'memory_request_std': 0.04,
+            'disk_space_request_mean': 0.2,
+            'disk_space_request_std': 0.03,
+            'different_machine_constraint_mean': 0.0,
         },
         {
             'job_id': 'JOB_003',
             'num_tasks': 200,
-            'avg_task_runtime': 150000000,
-            'max_task_runtime': 350000000,  # 2.33x - skewed!
-            'std_task_runtime': 60000000,
             'scheduling_class': 1,
-            'priority': 120
+            'priority': 120,
+            'cpu_request_mean': 1.3,
+            'cpu_request_std': 0.5,
+            'memory_request_mean': 1.0,
+            'memory_request_std': 0.4,
+            'disk_space_request_mean': 0.7,
+            'disk_space_request_std': 0.3,
+            'different_machine_constraint_mean': 0.0,
         },
         {
             'job_id': 'JOB_004',
             'num_tasks': 25,
-            'avg_task_runtime': 280000000,
-            'max_task_runtime': 320000000,  # 1.14x - not skewed
-            'std_task_runtime': 10000000,
             'scheduling_class': 3,
-            'priority': 200
+            'priority': 200,
+            'cpu_request_mean': 0.5,
+            'cpu_request_std': 0.06,
+            'memory_request_mean': 0.4,
+            'memory_request_std': 0.05,
+            'disk_space_request_mean': 0.3,
+            'disk_space_request_std': 0.04,
+            'different_machine_constraint_mean': 0.0,
         },
         {
             'job_id': 'JOB_005',
             'num_tasks': 100,
-            'avg_task_runtime': 180000000,
-            'max_task_runtime': 400000000,  # 2.22x - skewed!
-            'std_task_runtime': 70000000,
             'scheduling_class': 2,
-            'priority': 130
+            'priority': 130,
+            'cpu_request_mean': 1.0,
+            'cpu_request_std': 0.35,
+            'memory_request_mean': 0.8,
+            'memory_request_std': 0.3,
+            'disk_space_request_mean': 0.5,
+            'disk_space_request_std': 0.2,
+            'different_machine_constraint_mean': 0.0,
         }
     ]
     
     print("\n📋 Job Queue:")
     for job in new_jobs:
-        print(f"  {job['job_id']}: {job['num_tasks']} tasks, "
-              f"max/avg ratio: {job['max_task_runtime']/job['avg_task_runtime']:.2f}x")
+          print(f"  {job['job_id']}: {job['num_tasks']} tasks, "
+              f"cpu_mean: {job['cpu_request_mean']:.2f}, mem_mean: {job['memory_request_mean']:.2f}")
     
     print("\n🔮 Running Predictions...")
     predictions = []

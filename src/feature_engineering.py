@@ -1,12 +1,158 @@
 """
 Feature Engineering Module
 
-This module aggregates task-level data to job-level features.
-All features are pre-execution features that can be computed before job execution.
+This module builds job-level features for training and inference.
+It now separates leakage-free pre-execution features from runtime-based labels.
 """
 
 import pandas as pd
 import numpy as np
+
+
+PRE_EXEC_FEATURES = [
+    "num_tasks",
+    "scheduling_class",
+    "priority",
+    "cpu_request_mean",
+    "cpu_request_std",
+    "memory_request_mean",
+    "memory_request_std",
+    "disk_space_request_mean",
+    "disk_space_request_std",
+    "different_machine_constraint_mean",
+]
+
+EARLY_EXEC_FEATURES = [
+    "early_num_tasks",
+    "early_avg_task_runtime",
+    "early_max_task_runtime",
+    "early_std_task_runtime",
+    "num_tasks",
+    "scheduling_class",
+    "priority",
+    "cpu_request_mean",
+    "memory_request_mean",
+    "disk_space_request_mean",
+]
+
+
+def _coerce_numeric(df: pd.DataFrame, cols: list) -> pd.DataFrame:
+    out = df.copy()
+    for col in cols:
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+    return out
+
+
+def _mode_or_first(series: pd.Series):
+    if series.empty:
+        return 0
+    try:
+        return series.mode().iloc[0]
+    except Exception:
+        return series.iloc[0]
+
+
+def extract_pre_execution_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Extract leakage-free job-level features from pre-execution information only.
+    Uses submit events (event_type == 0) when available.
+    """
+    df_prep = df.copy()
+
+    if "collection_id" in df_prep.columns and "job_id" not in df_prep.columns:
+        df_prep["job_id"] = df_prep["collection_id"]
+    if "instance_index" in df_prep.columns and "task_index" not in df_prep.columns:
+        df_prep["task_index"] = df_prep["instance_index"]
+
+    if "event_type" in df_prep.columns:
+        submit_events = df_prep[df_prep["event_type"] == 0].copy()
+    else:
+        submit_events = df_prep.copy()
+
+    if submit_events.empty:
+        raise ValueError("No submit events found to build pre-execution features.")
+
+    numeric_cols = [
+        "cpu_request",
+        "memory_request",
+        "disk_space_request",
+        "priority",
+        "scheduling_class",
+        "different_machine_constraint",
+    ]
+    submit_events = _coerce_numeric(submit_events, numeric_cols)
+
+    # Derive submit time for time-based splits.
+    if "timestamp" in submit_events.columns:
+        submit_time = submit_events.groupby("job_id")["timestamp"].min().rename("submit_time")
+    elif "start_time" in submit_events.columns:
+        submit_time = submit_events.groupby("job_id")["start_time"].min().rename("submit_time")
+    else:
+        submit_time = pd.Series(dtype=float, name="submit_time")
+
+    if "task_index" in submit_events.columns:
+        num_tasks = submit_events.groupby("job_id")["task_index"].nunique().rename("num_tasks")
+    else:
+        num_tasks = submit_events.groupby("job_id").size().rename("num_tasks")
+
+    agg = {}
+    for base_col in ["cpu_request", "memory_request", "disk_space_request"]:
+        if base_col in submit_events.columns:
+            agg[base_col] = ["mean", "std"]
+
+    if "different_machine_constraint" in submit_events.columns:
+        agg["different_machine_constraint"] = "mean"
+
+    if "priority" in submit_events.columns:
+        agg["priority"] = "mean"
+    if "scheduling_class" in submit_events.columns:
+        agg["scheduling_class"] = _mode_or_first
+    if "user_name" in submit_events.columns:
+        agg["user_name"] = _mode_or_first
+
+    if agg:
+        features = submit_events.groupby("job_id").agg(agg).reset_index()
+        if isinstance(features.columns, pd.MultiIndex):
+            flat_cols = ["job_id"]
+            for name, stat in features.columns.tolist()[1:]:
+                if stat:
+                    flat_cols.append(f"{name}_{stat}")
+                else:
+                    flat_cols.append(str(name))
+            features.columns = flat_cols
+    else:
+        features = submit_events[["job_id"]].drop_duplicates()
+
+    features = features.merge(num_tasks.reset_index(), on="job_id", how="left")
+
+    if not submit_time.empty:
+        features = features.merge(submit_time.reset_index(), on="job_id", how="left")
+
+    # Fill missing optional columns with defaults.
+    for col in PRE_EXEC_FEATURES:
+        if col not in features.columns:
+            features[col] = 0
+
+    # Normalize column names for expected feature naming.
+    features = features.rename(
+        columns={
+            "priority_mean": "priority",
+            "scheduling_class__mode_or_first": "scheduling_class",
+            "scheduling_class_<lambda>": "scheduling_class",
+            "user_name__mode_or_first": "user_name",
+            "user_name_<lambda>": "user_name",
+        }
+    )
+
+    # Ensure numeric types.
+    features = _coerce_numeric(features, PRE_EXEC_FEATURES + ["submit_time"])
+    for col in PRE_EXEC_FEATURES:
+        if col in features.columns:
+            features[col] = features[col].fillna(0)
+    features["num_tasks"] = features["num_tasks"].fillna(0).astype(int)
+
+    return features
 
 
 def aggregate_to_job_level(df: pd.DataFrame) -> pd.DataFrame:
@@ -137,9 +283,7 @@ def encode_categorical_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     df_encoded = df.copy()
     
-    # Encode scheduling_class (if it's categorical, use label encoding)
-    # In Google Cluster Traces, scheduling_class is already numeric (0-11)
-    # But we'll ensure it's treated as a feature
+    # Ensure scheduling_class is numeric if present.
     if 'scheduling_class' in df_encoded.columns:
         df_encoded['scheduling_class'] = pd.to_numeric(
             df_encoded['scheduling_class'], errors='coerce'
@@ -148,26 +292,16 @@ def encode_categorical_features(df: pd.DataFrame) -> pd.DataFrame:
     return df_encoded
 
 
-def get_feature_columns() -> list:
-    """
-    Get the list of feature column names for ML models.
-    
-    Returns:
-    --------
-    list
-        List of feature column names
-    """
-    return [
-        'num_tasks',
-        'avg_task_runtime',
-        'max_task_runtime',
-        'std_task_runtime',
-        'scheduling_class',
-        'priority'
-    ]
+def get_feature_columns(mode: str = "pre_exec") -> list:
+    """Get feature column names for the requested mode."""
+    if mode == "pre_exec":
+        return PRE_EXEC_FEATURES
+    if mode == "early_exec":
+        return EARLY_EXEC_FEATURES
+    raise ValueError(f"Unknown feature mode: {mode}")
 
 
-def prepare_features_for_training(df: pd.DataFrame) -> tuple:
+def prepare_features_for_training(df: pd.DataFrame, mode: str = "pre_exec") -> tuple:
     """
     Prepare features and labels for ML training.
     
@@ -181,7 +315,7 @@ def prepare_features_for_training(df: pd.DataFrame) -> tuple:
     tuple
         (X, y) where X is feature matrix and y is labels
     """
-    feature_cols = get_feature_columns()
+    feature_cols = get_feature_columns(mode=mode)
     
     # Check if all feature columns exist
     missing_cols = [col for col in feature_cols if col not in df.columns]
@@ -199,20 +333,20 @@ def prepare_features_for_training(df: pd.DataFrame) -> tuple:
 
 if __name__ == "__main__":
     from data_loader import load_task_events
-    from preprocessing import clean_task_events, extract_task_runtimes, prepare_for_aggregation
-    from skew_labeling import label_skewed_jobs
+    from preprocessing import clean_task_events, extract_task_runtimes
+    from skew_labeling import label_jobs_from_task_runtimes
     
     # Test feature engineering
     try:
         df = load_task_events()
         df_clean = clean_task_events(df)
         df_runtimes = extract_task_runtimes(df_clean)
-        df_prep = prepare_for_aggregation(df_runtimes)
-        job_features = aggregate_to_job_level(df_prep)
-        job_features = encode_categorical_features(job_features)
-        job_features = label_skewed_jobs(job_features)
-        
-        X, y = prepare_features_for_training(job_features)
+        pre_exec = extract_pre_execution_features(df_clean)
+        pre_exec = encode_categorical_features(pre_exec)
+        labels = label_jobs_from_task_runtimes(df_runtimes)
+        job_features = pre_exec.merge(labels, on="job_id", how="inner")
+
+        X, y = prepare_features_for_training(job_features, mode="pre_exec")
         
         print("\nFeature summary:")
         print(X.describe())
