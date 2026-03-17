@@ -7,6 +7,7 @@ It now separates leakage-free pre-execution features from runtime-based labels.
 
 import pandas as pd
 import numpy as np
+import ast
 
 
 PRE_EXEC_FEATURES = [
@@ -53,6 +54,54 @@ def _mode_or_first(series: pd.Series):
         return series.iloc[0]
 
 
+def _parse_resource_request_value(value):
+    """Parse a resource_request entry into (cpu, memory, disk)."""
+    if pd.isna(value):
+        return (np.nan, np.nan, np.nan)
+
+    data = value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return (np.nan, np.nan, np.nan)
+        try:
+            data = ast.literal_eval(text)
+        except Exception:
+            return (np.nan, np.nan, np.nan)
+
+    if not isinstance(data, dict):
+        return (np.nan, np.nan, np.nan)
+
+    cpu = data.get("cpus", data.get("cpu", np.nan))
+    memory = data.get("memory", data.get("mem", np.nan))
+    disk = data.get("disk", data.get("disk_space", np.nan))
+    return (cpu, memory, disk)
+
+
+def _parse_constraint_value(value):
+    """Convert constraint field to a numeric proxy (0 if empty, else 1)."""
+    if pd.isna(value):
+        return np.nan
+
+    parsed = value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return 0.0
+        try:
+            parsed = ast.literal_eval(text)
+        except Exception:
+            return 0.0
+
+    if isinstance(parsed, (list, tuple, set)):
+        return 1.0 if len(parsed) > 0 else 0.0
+
+    if isinstance(parsed, dict):
+        return 1.0 if len(parsed) > 0 else 0.0
+
+    return 0.0
+
+
 def extract_pre_execution_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Extract leakage-free job-level features from pre-execution information only.
@@ -64,6 +113,25 @@ def extract_pre_execution_features(df: pd.DataFrame) -> pd.DataFrame:
         df_prep["job_id"] = df_prep["collection_id"]
     if "instance_index" in df_prep.columns and "task_index" not in df_prep.columns:
         df_prep["task_index"] = df_prep["instance_index"]
+    if "user" in df_prep.columns and "user_name" not in df_prep.columns:
+        df_prep["user_name"] = df_prep["user"]
+    if "time" in df_prep.columns and "timestamp" not in df_prep.columns:
+        df_prep["timestamp"] = df_prep["time"]
+
+    # Direct-format traces may store resources in a nested string dict.
+    # Parse this once into numeric columns expected by the pipeline.
+    if "resource_request" in df_prep.columns and (
+        "cpu_request" not in df_prep.columns or "memory_request" not in df_prep.columns
+    ):
+        parsed = df_prep["resource_request"].map(_parse_resource_request_value)
+        parsed_df = pd.DataFrame(parsed.tolist(), columns=["cpu_request", "memory_request", "disk_space_request"],
+                                 index=df_prep.index)
+        for col in ["cpu_request", "memory_request", "disk_space_request"]:
+            if col not in df_prep.columns:
+                df_prep[col] = parsed_df[col]
+
+    if "constraint" in df_prep.columns and "different_machine_constraint" not in df_prep.columns:
+        df_prep["different_machine_constraint"] = df_prep["constraint"].map(_parse_constraint_value)
 
     if "event_type" in df_prep.columns:
         submit_events = df_prep[df_prep["event_type"] == 0].copy()
@@ -129,11 +197,6 @@ def extract_pre_execution_features(df: pd.DataFrame) -> pd.DataFrame:
     if not submit_time.empty:
         features = features.merge(submit_time.reset_index(), on="job_id", how="left")
 
-    # Fill missing optional columns with defaults.
-    for col in PRE_EXEC_FEATURES:
-        if col not in features.columns:
-            features[col] = 0
-
     # Normalize column names for expected feature naming.
     features = features.rename(
         columns={
@@ -144,6 +207,11 @@ def extract_pre_execution_features(df: pd.DataFrame) -> pd.DataFrame:
             "user_name_<lambda>": "user_name",
         }
     )
+
+    # Fill missing optional columns with defaults.
+    for col in PRE_EXEC_FEATURES:
+        if col not in features.columns:
+            features[col] = 0
 
     # Ensure numeric types.
     features = _coerce_numeric(features, PRE_EXEC_FEATURES + ["submit_time"])

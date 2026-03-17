@@ -6,16 +6,26 @@ This module evaluates trained ML models using various metrics and visualizations
 
 import pandas as pd
 import numpy as np
+from collections import defaultdict
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     confusion_matrix, classification_report, roc_auc_score,
     average_precision_score, brier_score_loss
 )
 from sklearn.calibration import calibration_curve
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend — prevents tkinter errors in CLI runs
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 from pathlib import Path
+
+
+def _show_plot_if_interactive() -> None:
+    backend = matplotlib.get_backend().lower()
+    if "agg" not in backend:
+        plt.show()
+    plt.close()
 
 
 def evaluate_model(y_true: pd.Series, y_pred: pd.Series, model_name: str = "Model") -> dict:
@@ -127,7 +137,7 @@ def plot_confusion_matrix(y_true: pd.Series, y_pred: pd.Series,
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"Confusion matrix saved to {save_path}")
     
-    plt.show()
+    _show_plot_if_interactive()
 
 
 def plot_feature_importance(model, feature_names: list, model_name: str = "Model",
@@ -177,26 +187,30 @@ def plot_feature_importance(model, feature_names: list, model_name: str = "Model
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"Feature importance plot saved to {save_path}")
     
-    plt.show()
+    _show_plot_if_interactive()
 
 
 def evaluate_all_models(models: dict, scalers: dict, X_test: pd.DataFrame,
-                       y_test: pd.Series, feature_names: list):
+                       y_test: pd.Series, feature_names: list,
+                       skip_plots: bool = False):
     """
-    Evaluate all trained models and generate visualizations.
-    
+    Evaluate all trained models and (optionally) generate visualizations.
+
     Parameters:
     -----------
     models : dict
         Dictionary of trained models
     scalers : dict
-        Dictionary of scalers
+        Dictionary of scalers (currently unused; kept for API compatibility)
     X_test : pd.DataFrame
         Test features
     y_test : pd.Series
         Test labels
     feature_names : list
         List of feature names
+    skip_plots : bool
+        When True, skip confusion-matrix and feature-importance plots.
+        Use this during rolling-eval loops to avoid generating dozens of images.
     """
     results = {}
     
@@ -216,16 +230,67 @@ def evaluate_all_models(models: dict, scalers: dict, X_test: pd.DataFrame,
         metrics["ece"] = ece
         results[model_name] = metrics
         
-        # Plot confusion matrix
-        plot_confusion_matrix(y_test, y_pred, model_name,
-                            f"models/confusion_matrix_{model_name.lower().replace(' ', '_')}.png")
-        
-        # Plot feature importance (for Random Forest)
-        if model_name == 'random_forest':
-            plot_feature_importance(model, feature_names, model_name,
-                                  f"models/feature_importance_{model_name.lower().replace(' ', '_')}.png")
-    
+        if not skip_plots:
+            # Plot confusion matrix
+            plot_confusion_matrix(y_test, y_pred, model_name,
+                                f"models/confusion_matrix_{model_name.lower().replace(' ', '_')}.png")
+
+            # Plot feature importance (for Random Forest)
+            if model_name == 'random_forest':
+                plot_feature_importance(model, feature_names, model_name,
+                                      f"models/feature_importance_{model_name.lower().replace(' ', '_')}.png")
+
     return results
+
+
+def print_rolling_summary(fold_results: list) -> dict:
+    """
+    Aggregate per-fold evaluation results and print a mean ± std summary table.
+
+    Parameters
+    ----------
+    fold_results : list[dict]
+        Each element is the return value of ``evaluate_all_models`` for one fold,
+        i.e. ``{model_name: metrics_dict}``.
+
+    Returns
+    -------
+    dict
+        ``{model_name: {metric: {'mean': float, 'std': float}}}``
+    """
+    accum = defaultdict(lambda: defaultdict(list))
+    for fold_res in fold_results:
+        for model_name, metrics in fold_res.items():
+            for metric, value in metrics.items():
+                accum[model_name][metric].append(value)
+
+    agg = {
+        model_name: {
+            k: {'mean': float(np.mean(v)), 'std': float(np.std(v))}
+            for k, v in metric_lists.items()
+        }
+        for model_name, metric_lists in accum.items()
+    }
+
+    n_folds = len(fold_results)
+    width = 80
+    print(f"\n{'='*width}")
+    print(f"ROLLING TIME-SPLIT SUMMARY  ({n_folds} folds, mean \u00b1 std)")
+    print(f"{'='*width}")
+    print(f"{'Model':<22} {'PR-AUC':<19} {'Recall':<19} {'F1-Score':<19}")
+    print("-" * width)
+
+    def _fmt(m, key):
+        if key not in m:
+            return "N/A"
+        return f"{m[key]['mean']:.4f} \u00b1 {m[key]['std']:.4f}"
+
+    for model_name, m in agg.items():
+        print(f"{model_name:<22} {_fmt(m,'pr_auc'):<19} {_fmt(m,'recall'):<19} "
+              f"{_fmt(m,'f1_score'):<19}")
+
+    print("=" * width + "\n")
+    return agg
 
 
 def print_comparison_table(results: dict):

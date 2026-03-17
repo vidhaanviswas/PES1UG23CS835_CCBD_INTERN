@@ -13,6 +13,10 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.calibration import CalibratedClassifierCV
+try:
+    from sklearn.frozen import FrozenEstimator
+except Exception:
+    FrozenEstimator = None
 import pickle
 import os
 from pathlib import Path
@@ -194,10 +198,53 @@ def apply_smote_if_available(X_train: pd.DataFrame, y_train: pd.Series) -> tuple
     return X_res, y_res
 
 
-def calibrate_model(model, X_train: pd.DataFrame, y_train: pd.Series,
+def split_train_calibration(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    calibration_size: float = 0.2,
+    random_state: int = 42,
+) -> tuple:
+    """
+    Create a real holdout split for probability calibration.
+
+    Returns (X_fit, X_calib, y_fit, y_calib). If a stratified split is not
+    possible because of class sparsity, calibration fold values are returned
+    as None and callers can skip calibration safely.
+    """
+    if y_train.nunique() < 2:
+        return X_train, None, y_train, None
+
+    try:
+        X_fit, X_calib, y_fit, y_calib = train_test_split(
+            X_train,
+            y_train,
+            test_size=calibration_size,
+            random_state=random_state,
+            stratify=y_train,
+        )
+    except ValueError:
+        # Fallback to unstratified split when class counts are too small.
+        X_fit, X_calib, y_fit, y_calib = train_test_split(
+            X_train,
+            y_train,
+            test_size=calibration_size,
+            random_state=random_state,
+            stratify=None,
+        )
+
+    if y_calib.nunique() < 2:
+        return X_train, None, y_train, None
+
+    return X_fit, X_calib, y_fit, y_calib
+
+
+def calibrate_model(model, X_calib: pd.DataFrame, y_calib: pd.Series,
                     method: str = "isotonic"):
-    calibrated = CalibratedClassifierCV(model, method=method, cv=3)
-    calibrated.fit(X_train, y_train)
+    if FrozenEstimator is not None:
+        calibrated = CalibratedClassifierCV(FrozenEstimator(model), method=method, cv=None)
+    else:
+        calibrated = CalibratedClassifierCV(model, method=method, cv="prefit")
+    calibrated.fit(X_calib, y_calib)
     return calibrated
 
 
@@ -211,9 +258,12 @@ def save_models(models: dict, scalers: dict, save_path: str = "models/trained_mo
         Dictionary of trained models (e.g., {'lr': model, 'rf': model})
     scalers : dict
         Dictionary of scalers (e.g., {'lr': scaler})
-    save_path : str
-        Path to save the models
+    save_path : str or None
+        Path to save the models. Pass None to skip saving (e.g. in rolling eval loops).
     """
+    if save_path is None:
+        return
+
     # Convert to absolute path if relative
     if not os.path.isabs(save_path):
         project_root = Path(__file__).parent.parent
@@ -272,6 +322,7 @@ def train_all_models(X_train: pd.DataFrame, y_train: pd.Series,
                     use_smote: bool = False,
                     calibrate: bool = True,
                     calibration_method: str = "isotonic",
+                    calibration_size: float = 0.2,
                     save_path: str = "models/trained_models.pkl") -> tuple:
     """
     Train all ML models and save them.
@@ -282,8 +333,8 @@ def train_all_models(X_train: pd.DataFrame, y_train: pd.Series,
         Training features
     y_train : pd.Series
         Training labels
-    X_test : pd.DataFrame, optional
-        Test features for scaling consistency
+    calibration_size : float
+        Fraction of input training data reserved as untouched calibration holdout.
     save_path : str
         Path to save the models
         
@@ -295,35 +346,49 @@ def train_all_models(X_train: pd.DataFrame, y_train: pd.Series,
     models = {}
     scalers = {}
 
+    X_fit, y_fit = X_train, y_train
+    X_calib, y_calib = None, None
+    if calibrate:
+        X_fit, X_calib, y_fit, y_calib = split_train_calibration(
+            X_train,
+            y_train,
+            calibration_size=calibration_size,
+            random_state=42,
+        )
+        if X_calib is None:
+            print("Calibration skipped: unable to create a valid holdout with both classes")
+        else:
+            print(f"Calibration holdout: {len(X_calib):,} samples")
+
     if use_smote:
-        X_train, y_train = apply_smote_if_available(X_train, y_train)
+        X_fit, y_fit = apply_smote_if_available(X_fit, y_fit)
 
     # Train Logistic Regression
-    lr_model = train_logistic_regression(X_train, y_train)
-    if calibrate:
-        lr_model = calibrate_model(lr_model, X_train, y_train, method=calibration_method)
+    lr_model = train_logistic_regression(X_fit, y_fit)
+    if calibrate and X_calib is not None:
+        lr_model = calibrate_model(lr_model, X_calib, y_calib, method=calibration_method)
     models["logistic_regression"] = lr_model
 
     # Train Random Forest
-    rf_model = train_random_forest(X_train, y_train)
-    if calibrate:
-        rf_model = calibrate_model(rf_model, X_train, y_train, method=calibration_method)
+    rf_model = train_random_forest(X_fit, y_fit)
+    if calibrate and X_calib is not None:
+        rf_model = calibrate_model(rf_model, X_calib, y_calib, method=calibration_method)
     models["random_forest"] = rf_model
 
     # Train XGBoost
     try:
-        xgb_model = train_xgboost(X_train, y_train)
-        if calibrate:
-            xgb_model = calibrate_model(xgb_model, X_train, y_train, method=calibration_method)
+        xgb_model = train_xgboost(X_fit, y_fit)
+        if calibrate and X_calib is not None:
+            xgb_model = calibrate_model(xgb_model, X_calib, y_calib, method=calibration_method)
         models["xgboost"] = xgb_model
     except Exception as e:
         print(f"Skipping XGBoost: {e}")
 
     # Train LightGBM
     try:
-        lgbm_model = train_lightgbm(X_train, y_train)
-        if calibrate:
-            lgbm_model = calibrate_model(lgbm_model, X_train, y_train, method=calibration_method)
+        lgbm_model = train_lightgbm(X_fit, y_fit)
+        if calibrate and X_calib is not None:
+            lgbm_model = calibrate_model(lgbm_model, X_calib, y_calib, method=calibration_method)
         models["lightgbm"] = lgbm_model
     except Exception as e:
         print(f"Skipping LightGBM: {e}")

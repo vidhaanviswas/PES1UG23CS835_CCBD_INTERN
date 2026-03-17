@@ -11,10 +11,19 @@ from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     confusion_matrix
 )
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 from pathlib import Path
+
+
+def _show_plot_if_interactive() -> None:
+    backend = matplotlib.get_backend().lower()
+    if "agg" not in backend:
+        plt.show()
+    plt.close()
 
 
 def baseline_predict(df: pd.DataFrame, threshold: float = None,
@@ -168,7 +177,7 @@ def plot_baseline_confusion_matrix(y_true: pd.Series, y_pred: pd.Series,
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"Baseline confusion matrix saved to {save_path}")
     
-    plt.show()
+    _show_plot_if_interactive()
 
 
 def compare_with_ml_models(baseline_metrics: dict, ml_results: dict):

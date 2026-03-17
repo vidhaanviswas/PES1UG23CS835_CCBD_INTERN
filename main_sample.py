@@ -18,13 +18,10 @@ from preprocessing import clean_task_events, extract_task_runtimes
 from feature_engineering import extract_pre_execution_features, encode_categorical_features, prepare_features_for_training, get_feature_columns
 from skew_labeling import label_jobs_from_task_runtimes, get_skew_statistics
 from train_model import train_all_models
-from evaluate_model import evaluate_all_models, print_comparison_table
+from evaluate_model import evaluate_all_models, print_comparison_table, print_rolling_summary
 from baseline import evaluate_baseline, plot_baseline_confusion_matrix, compare_with_ml_models
-from splitters import add_template_id, time_based_split, template_based_split
+from splitters import add_template_id, time_based_split, template_based_split, rolling_time_splits
 from logger import setup_logging, close_logging
-import pandas as pd
-from baseline import evaluate_baseline, plot_baseline_confusion_matrix, compare_with_ml_models
-from splitters import add_template_id, time_based_split, template_based_split
 import pandas as pd
 
 
@@ -52,7 +49,7 @@ def save_processed_data(df: pd.DataFrame, save_path: str = "data/processed/job_l
     print(f"Total jobs: {len(df):,}")
 
 
-def main():
+def main(sample_size: int = 500000):
     """
     Main pipeline execution function using sample data.
     """
@@ -63,19 +60,15 @@ def main():
     print("\nNOTE: Running with SAMPLE DATA")
     print("="*80)
     
-    # Configuration: Adjust sample size here
-    # Recommended sample sizes:
-    # - 100,000 rows: Quick test (~1-2 minutes)
-    # - 500,000 rows: Good balance (~5-10 minutes)
-    # - 1,000,000 rows: More representative (~10-20 minutes)
-    # - None: Load full sample dataset (if you have it)
-    SAMPLE_SIZE = 500000  # Change this to adjust sample size
-    
     try:
         # Step 1: Load sample data
-        print(f"\n[Step 1/8] Loading sample dataset ({SAMPLE_SIZE:,} rows)...")
-        if SAMPLE_SIZE:
-            df = get_sample_data(n_rows=SAMPLE_SIZE)
+        if sample_size is None:
+            print("\n[Step 1/8] Loading full dataset...")
+        else:
+            print(f"\n[Step 1/8] Loading sample dataset ({sample_size:,} rows)...")
+
+        if sample_size is not None:
+            df = get_sample_data(n_rows=sample_size)
         else:
             # Load full sample dataset if available
             from data_loader import load_task_events
@@ -150,8 +143,35 @@ def main():
                                          save_path="models/trained_models_template.pkl")
         ml_results_tpl = evaluate_all_models(models_tpl, {}, X_test_tpl, y_test_tpl, feature_names)
         print_comparison_table(ml_results_tpl)
-        
-        print("\n" + "="*80)
+
+        # Rolling time-split evaluation (mean ± std across folds)
+        print("\n[Extra] Rolling time-split evaluation (3 folds, mean \u00b1 std)...")
+        fold_results = []
+        for fold_idx, (tr_df, te_df) in enumerate(
+            rolling_time_splits(job_labeled, n_splits=3, test_size=0.2, min_train_ratio=0.40), 1
+        ):
+            n_pos_train = int(tr_df["is_skewed"].sum()) if "is_skewed" in tr_df.columns else 0
+            n_pos_test = int(te_df["is_skewed"].sum()) if "is_skewed" in te_df.columns else 0
+            if n_pos_train < 6 or n_pos_test == 0:
+                print(f"  Fold {fold_idx}: skipped "
+                      f"(pos train={n_pos_train}, pos test={n_pos_test})")
+                continue
+            print(f"  Fold {fold_idx}: {len(tr_df):,} train ({n_pos_train} pos) | "
+                  f"{len(te_df):,} test ({n_pos_test} pos)")
+            X_tr, y_tr = prepare_features_for_training(tr_df, mode="pre_exec")
+            X_te, y_te = prepare_features_for_training(te_df, mode="pre_exec")
+            fold_models, _ = train_all_models(
+                X_tr, y_tr, use_smote=True, calibrate=True, save_path=None
+            )
+            fold_res = evaluate_all_models(
+                fold_models, {}, X_te, y_te, feature_names, skip_plots=True
+            )
+            fold_results.append(fold_res)
+        if fold_results:
+            print_rolling_summary(fold_results)
+        else:
+            print("  No valid folds found for rolling evaluation.")
+
         print("Pipeline execution completed successfully!")
         print("="*80)
         print("\nOutputs generated:")
@@ -178,16 +198,27 @@ def main():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the data skew prediction pipeline on sample data")
+    parser.add_argument(
+        "--sample-size",
+        type=int,
+        default=500000,
+        help=(
+            "Number of task-event rows to load (default: 500000). "
+            "Use 0 to load full dataset."
+        ),
+    )
     parser.add_argument("--save-log", action="store_true", 
                         help="Save terminal output to log file in outputs/ directory")
     args = parser.parse_args()
+
+    sample_size = None if args.sample_size == 0 else args.sample_size
     
     logger = None
     if args.save_log:
         logger = setup_logging("main_sample")
     
     try:
-        main()
+        main(sample_size=sample_size)
     finally:
         if logger:
             close_logging(logger)

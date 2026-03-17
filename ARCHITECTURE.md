@@ -134,7 +134,7 @@
 │  │                    INTERACTIVE DASHBOARD                          │  │
 │  │                    (Streamlit - Optional)                         │  │
 │  │                                                                   │  │
-│  │  • Live job simulation (job_simulator.py)                         │  │
+│  │  • Live predictions via CLI                                        │  │
 │  │  • Real-time predictions                                          │  │
 │  │  • Visualizations (charts, tables)                                │  │
 │  │  • Non-technical explanations                                     │  │
@@ -188,7 +188,7 @@
 │  • analyze_results.py       - Results analysis                      │
 │  • create_advanced_plots.py - Advanced visualizations              │
 │  • dashboard_app.py         - Streamlit dashboard                   │
-│  • job_simulator.py         - Synthetic job generation              │
+│  • validate_model.py         - Model validation and metrics          │
 │  • demo_production_use.py   - Production use examples               │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -673,8 +673,7 @@ project_root/
 ├── main_sample.py          # Alternative entry (sample data)
 │
 ├── predict_job.py          # Uses trained_models.pkl
-├── dashboard_app.py        # Uses predict_job.py + job_simulator.py
-├── job_simulator.py        # Used by dashboard_app.py
+├── validate_model.py       # Model validation utilities
 │
 └── requirements.txt        # Dependencies
 ```

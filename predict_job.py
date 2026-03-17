@@ -17,7 +17,29 @@ from train_model import load_models
 from feature_engineering import get_feature_columns
 
 
-def predict_job_skew(job_features: dict, model_name: str = 'logistic_regression'):
+# Model-specific thresholds tuned on held-out real data in hybrid setting.
+DEFAULT_INFERENCE_THRESHOLDS = {
+    "logistic_regression": 0.10,
+    "random_forest": 0.08,
+    "xgboost": 0.07,
+    "lightgbm": 0.23,
+}
+
+
+def _resolve_threshold(model_name: str, threshold: float = None) -> float:
+    """Resolve inference threshold (explicit override wins over model defaults)."""
+    if threshold is not None:
+        return float(threshold)
+    return float(DEFAULT_INFERENCE_THRESHOLDS.get(model_name, 0.5))
+
+
+def get_default_threshold(model_name: str) -> float:
+    """Public helper to fetch default inference threshold for a model."""
+    return _resolve_threshold(model_name=model_name, threshold=None)
+
+
+def predict_job_skew(job_features: dict, model_name: str = 'logistic_regression',
+                     threshold: float = None):
     """
     Predict if a job will be skewed based on pre-execution features.
     
@@ -38,7 +60,11 @@ def predict_job_skew(job_features: dict, model_name: str = 'logistic_regression'
             'different_machine_constraint_mean': float
         }
     model_name : str
-        Model to use: 'logistic_regression' or 'random_forest'
+        Model to use (e.g., 'logistic_regression', 'random_forest',
+        'xgboost', 'lightgbm')
+    threshold : float, optional
+        Decision threshold for classifying a job as skewed.
+        If None, uses tuned per-model defaults.
         
     Returns:
     --------
@@ -65,19 +91,19 @@ def predict_job_skew(job_features: dict, model_name: str = 'logistic_regression'
         if missing:
             raise ValueError(f"Missing required features: {missing}")
         
-        # Get probability and prediction
+        # Get probability and threshold-based prediction.
         proba = model.predict_proba(X)[0]
-        prediction = model.predict(X)[0]
-        
-        # Get probability of being skewed
         skew_probability = proba[1]  # Probability of class 1 (skewed)
+        threshold_used = _resolve_threshold(model_name, threshold)
+        prediction = int(skew_probability >= threshold_used)
         
         return {
             'job_id': job_features.get('job_id', 'unknown'),
             'prediction': int(prediction),
             'skew_probability': float(skew_probability),
             'is_skewed': bool(prediction == 1),
-            'confidence': 'high' if abs(skew_probability - 0.5) > 0.3 else 'medium' if abs(skew_probability - 0.5) > 0.15 else 'low',
+            'threshold_used': float(threshold_used),
+            'confidence': 'high' if abs(skew_probability - threshold_used) > 0.3 else 'medium' if abs(skew_probability - threshold_used) > 0.15 else 'low',
             'recommendation': get_recommendation(prediction, skew_probability)
         }
         
@@ -102,7 +128,8 @@ def get_recommendation(prediction: int, probability: float) -> str:
             return "LOW-MODERATE RISK: Job likely balanced but monitor for unexpected skew."
 
 
-def predict_from_dataframe(df: pd.DataFrame, model_name: str = 'logistic_regression'):
+def predict_from_dataframe(df: pd.DataFrame, model_name: str = 'logistic_regression',
+                           threshold: float = None):
     """
     Predict skew for multiple jobs from a dataframe.
     
@@ -112,6 +139,9 @@ def predict_from_dataframe(df: pd.DataFrame, model_name: str = 'logistic_regress
         DataFrame with job features
     model_name : str
         Model to use
+    threshold : float, optional
+        Decision threshold for classifying jobs as skewed.
+        If None, uses tuned per-model defaults.
         
     Returns:
     --------
@@ -127,14 +157,16 @@ def predict_from_dataframe(df: pd.DataFrame, model_name: str = 'logistic_regress
         X = df[feature_cols].copy()
         
         proba = model.predict_proba(X)
-        predictions = model.predict(X)
+        threshold_used = _resolve_threshold(model_name, threshold)
+        predictions = (proba[:, 1] >= threshold_used).astype(int)
         
         # Add predictions to dataframe
         df_result = df.copy()
         df_result['predicted_skew'] = predictions
         df_result['skew_probability'] = proba[:, 1]
+        df_result['threshold_used'] = float(threshold_used)
         df_result['prediction_confidence'] = df_result['skew_probability'].apply(
-            lambda p: 'high' if abs(p - 0.5) > 0.3 else 'medium' if abs(p - 0.5) > 0.15 else 'low'
+            lambda p: 'high' if abs(p - threshold_used) > 0.3 else 'medium' if abs(p - threshold_used) > 0.15 else 'low'
         )
         
         return df_result

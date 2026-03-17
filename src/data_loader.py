@@ -10,6 +10,22 @@ import os
 from pathlib import Path
 
 
+EVENT_REQUIRED_COLUMNS = {
+    'timestamp',
+    'job_id',
+    'task_index',
+    'event_type',
+}
+
+
+def _is_direct_runtime_format(df: pd.DataFrame) -> bool:
+    return any(col in df.columns for col in ('start_time', 'duration', 'end_time'))
+
+
+def _has_event_schema(df: pd.DataFrame) -> bool:
+    return EVENT_REQUIRED_COLUMNS.issubset(set(df.columns))
+
+
 def load_task_events(data_path: str = "data/raw/task_events.csv") -> pd.DataFrame:
     """
     Load the task_events.csv file from the Google Cluster Workload Traces dataset.
@@ -46,13 +62,19 @@ def load_task_events(data_path: str = "data/raw/task_events.csv") -> pd.DataFram
         print(f"Loaded dataset with headers: {list(df.columns)}")
         
         # Check if this is the direct format (has start_time/end_time or duration)
-        if 'start_time' in df.columns or 'duration' in df.columns or 'end_time' in df.columns:
+        if _is_direct_runtime_format(df):
             print("Detected direct format (borg_traces_data.csv style)")
             return df
-        
-        # Otherwise, assume it's event-based format with headers
-        print("Detected event-based format with headers")
-        return df
+
+        # Event-style format with proper named columns
+        if _has_event_schema(df):
+            print("Detected event-based format with headers")
+            return df
+
+        raise ValueError(
+            "Header-based parse succeeded but required columns were not found. "
+            "Falling back to headerless event format parse."
+        )
         
     except Exception as e1:
         # If that fails, try without headers (original task_events.csv format)
@@ -120,15 +142,21 @@ def get_sample_data(data_path: str = "data/raw/task_events.csv",
         print(f"Loaded dataset with headers: {list(df.columns)}")
         
         # Check if this is the direct format (has start_time/end_time or duration)
-        if 'start_time' in df.columns or 'duration' in df.columns or 'end_time' in df.columns:
+        if _is_direct_runtime_format(df):
             print("Detected direct format (borg_traces_data.csv style)")
             print(f"Loaded sample of {len(df):,} task events")
             return df
-        
-        # Otherwise, assume it's event-based format with headers
-        print("Detected event-based format with headers")
-        print(f"Loaded sample of {len(df):,} task events")
-        return df
+
+        # Event-style format with proper named columns
+        if _has_event_schema(df):
+            print("Detected event-based format with headers")
+            print(f"Loaded sample of {len(df):,} task events")
+            return df
+
+        raise ValueError(
+            "Header-based parse succeeded but required columns were not found. "
+            "Falling back to headerless event format parse."
+        )
         
     except Exception as e1:
         # If that fails, try without headers (original task_events.csv format)
