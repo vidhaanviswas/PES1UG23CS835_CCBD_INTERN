@@ -6,140 +6,36 @@
 
 ## 1. System Overview
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    RESEARCH PROJECT ARCHITECTURE                 │
-│         Early Prediction of Data Skew in Big Data Jobs           │
-└─────────────────────────────────────────────────────────────────┘
-
-┌──────────────┐         ┌──────────────┐         ┌──────────────┐
-│   Raw Data   │────────▶│  Processing  │────────▶│  ML Models  │
-│  (CSV Files) │         │   Pipeline   │         │  (Trained)  │
-└──────────────┘         └──────────────┘         └──────────────┘
-                                                         │
-                                                         ▼
-                                                  ┌──────────────┐
-                                                  │ Predictions  │
-                                                  │ & Dashboard  │
-                                                  └──────────────┘
+```mermaid
+flowchart LR
+    A[Raw Data<br/>CSV Files] --> B[Processing<br/>Pipeline]
+    B --> C[ML Models<br/>Trained]
+    C --> D[Predictions<br/>& Outputs]
 ```
 
 ---
 
 ## 2. High-Level Architecture Diagram
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          DATA INGESTION LAYER                           │
-│                                                                          │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │  Google Cluster Workload Traces (2019 Sample)                    │  │
-│  │  - task_events.csv (Raw task-level data)                         │  │
-│  │  - Format: Event-based or Direct (auto-detected)                │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│                              │                                           │
-│                              ▼                                           │
-└──────────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        DATA PROCESSING LAYER                            │
-│                                                                          │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐            │
-│  │   Data       │───▶│ Preprocessing│───▶│   Feature    │            │
-│  │   Loader     │    │   & Cleaning │    │ Engineering  │            │
-│  └──────────────┘    └──────────────┘    └──────────────┘            │
-│       │                     │                     │                    │
-│       │                     │                     │                    │
-│       ▼                     ▼                     ▼                    │
-│  • Load CSV          • Remove invalid    • Aggregate submit→job        │
-│  • Auto-detect       • Handle missing    • Compute features:           │
-│    format            • Extract runtime     - num_tasks                │
-│  • Column mapping    • Validate data       - scheduling_class         │
-│                       • Type conversion     - priority                │
-│                                         - cpu_request_mean/std        │
-│                                         - memory_request_mean/std     │
-│                                         - disk_space_request_mean/std │
-│                                         - different_machine_constraint│
-└──────────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         SKEW LABELING LAYER                             │
-│                                                                          │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │  Label Definition: max_task_runtime >= 2 * avg_task_runtime     │  │
-│  │  • Skewed (1): Jobs with significant runtime imbalance            │  │
-│  │  • Non-skewed (0): All other jobs                                │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│                              │                                           │
-│                              ▼                                           │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │  Processed Job-Level Dataset (job_level_data.csv)                │  │
-│  │  - Features + Labels ready for ML training                        │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        MACHINE LEARNING LAYER                           │
-│                                                                          │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                    TRAINING PIPELINE                              │  │
-│  │                                                                   │  │
-│  │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │  │
-│  │  │   Train/Test │───▶│   Feature    │───▶│   Model      │       │  │
-│  │  │   Split      │    │   Scaling    │    │   Training   │       │  │
-│  │  │  (80/20)     │    │  (Standard)  │    │              │       │  │
-│  │  └──────────────┘    └──────────────┘    └──────────────┘       │  │
-│  │                                                                    │  │
-│  │  Models Trained:                                                  │  │
-│  │  • Logistic Regression (with StandardScaler)                     │  │
-│  │  • Random Forest Classifier (100 trees, max_depth=10)            │  │
-│  │                                                                   │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│                              │                                           │
-│                              ▼                                           │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                    EVALUATION PIPELINE                            │  │
-│  │                                                                   │  │
-│  │  • Accuracy, Precision, Recall, F1-Score                        │  │
-│  │  • Confusion Matrix                                               │  │
-│  │  • Feature Importance (Random Forest)                            │  │
-│  │  • Baseline Comparison (Rule-based)                               │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│                              │                                           │
-│                              ▼                                           │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │  Trained Models (trained_models.pkl)                             │  │
-│  │  - Logistic Regression model + scaler                            │  │
-│  │  - Random Forest model                                           │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        PREDICTION & VISUALIZATION LAYER                  │
-│                                                                          │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                    PRODUCTION PREDICTION                          │  │
-│  │                                                                   │  │
-│  │  • Single job prediction (predict_job.py)                        │  │
-│  │  • Batch prediction (predict_from_dataframe)                     │  │
-│  │  • Model validation (validate_model.py)                          │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│                              │                                           │
-│                              ▼                                           │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                    INTERACTIVE DASHBOARD                          │  │
-│  │                    (Streamlit - Optional)                         │  │
-│  │                                                                   │  │
-│  │  • Live predictions via CLI                                        │  │
-│  │  • Real-time predictions                                          │  │
-│  │  • Visualizations (charts, tables)                                │  │
-│  │  • Non-technical explanations                                     │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A[data/raw/task_events.csv<br/>Google Cluster Traces 2019] --> B[src/data_loader.py<br/>Load & auto-detect format]
+    B --> C[src/preprocessing.py<br/>Clean, extract runtimes]
+    C --> D[src/feature_engineering.py<br/>Aggregate to job-level]
+    C --> E[src/skew_labeling.py<br/>Label: max >= 2 x avg]
+    D --> F[Job-Level Features]
+    E --> G[Skew Labels 0/1]
+    F --> H[data/processed/job_level_data.csv]
+    G --> H
+    H --> I[main.py / main_sample.py]
+    I --> J[src/splitters.py<br/>time / template / rolling]
+    J --> K[src/train_model.py<br/>fit split + calibration holdout<br/>SMOTE on fit subset only]
+    K --> L[models/trained_models.pkl<br/>LR, RF, XGBoost, LightGBM]
+    L --> M[src/evaluate_model.py<br/>Accuracy, F1, PR-AUC<br/>ROC-AUC, Brier, ECE]
+    M --> N[outputs/ metrics + PNG plots]
+    L --> O[predict_job.py<br/>per-model tuned thresholds]
+    O --> P[mitigation_simulation.py]
+    P --> Q[outputs/mitigation_impact_*.csv]
 ```
 
 ---
