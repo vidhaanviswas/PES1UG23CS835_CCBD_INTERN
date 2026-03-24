@@ -25,6 +25,15 @@ DEFAULT_INFERENCE_THRESHOLDS = {
     "lightgbm": 0.23,
 }
 
+# Confidence bands are based on distance from the model decision threshold.
+# Values are tuned per model so live streams do not collapse to one bucket.
+CONFIDENCE_MARGIN_BANDS = {
+    "logistic_regression": {"low": 0.03, "high": 0.08},
+    "random_forest": {"low": 0.025, "high": 0.07},
+    "xgboost": {"low": 0.025, "high": 0.07},
+    "lightgbm": {"low": 0.04, "high": 0.10},
+}
+
 
 def _resolve_threshold(model_name: str, threshold: float = None) -> float:
     """Resolve inference threshold (explicit override wins over model defaults)."""
@@ -36,6 +45,21 @@ def _resolve_threshold(model_name: str, threshold: float = None) -> float:
 def get_default_threshold(model_name: str) -> float:
     """Public helper to fetch default inference threshold for a model."""
     return _resolve_threshold(model_name=model_name, threshold=None)
+
+
+def _prediction_confidence(probability: float, threshold: float, model_name: str) -> str:
+    """Map distance from decision boundary to low/medium/high confidence."""
+    # Extremely certain probabilities should always be high-confidence.
+    if probability <= 0.02 or probability >= 0.98:
+        return "high"
+
+    bands = CONFIDENCE_MARGIN_BANDS.get(model_name, {"low": 0.03, "high": 0.08})
+    margin = abs(float(probability) - float(threshold))
+    if margin >= float(bands["high"]):
+        return "high"
+    if margin >= float(bands["low"]):
+        return "medium"
+    return "low"
 
 
 def predict_job_skew(job_features: dict, model_name: str = 'logistic_regression',
@@ -103,7 +127,7 @@ def predict_job_skew(job_features: dict, model_name: str = 'logistic_regression'
             'skew_probability': float(skew_probability),
             'is_skewed': bool(prediction == 1),
             'threshold_used': float(threshold_used),
-            'confidence': 'high' if abs(skew_probability - threshold_used) > 0.3 else 'medium' if abs(skew_probability - threshold_used) > 0.15 else 'low',
+            'confidence': _prediction_confidence(skew_probability, threshold_used, model_name),
             'recommendation': get_recommendation(prediction, skew_probability)
         }
         
@@ -166,7 +190,7 @@ def predict_from_dataframe(df: pd.DataFrame, model_name: str = 'logistic_regress
         df_result['skew_probability'] = proba[:, 1]
         df_result['threshold_used'] = float(threshold_used)
         df_result['prediction_confidence'] = df_result['skew_probability'].apply(
-            lambda p: 'high' if abs(p - threshold_used) > 0.3 else 'medium' if abs(p - threshold_used) > 0.15 else 'low'
+            lambda p: _prediction_confidence(p, threshold_used, model_name)
         )
         
         return df_result
